@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -40,8 +42,36 @@ def _select_image_from_dialog(root: "Tk") -> Path | None:
     return Path(file_path)
 
 
-def _run_cli(image_path: Path) -> int:
+def _parse_cli_args(argv: list[str]) -> argparse.Namespace:
+    """Return CLI arguments shared with the standalone parser script."""
+
+    parser = argparse.ArgumentParser(
+        prog="python -m genetics_report_app",
+        description="Extract key genetic information from a screenshot without launching the GUI.",
+    )
+    parser.add_argument(
+        "image",
+        type=Path,
+        help="Path to the screenshot image (PNG, JPG, PDF supported by Pillow).",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output the extracted data as JSON instead of human readable text.",
+    )
+    return parser.parse_args(argv)
+
+
+def _run_cli(argv: list[str]) -> int:
     """Execute the extraction logic without launching the GUI."""
+
+    try:
+        args = _parse_cli_args(argv)
+    except SystemExit as exc:
+        # Allow argparse to handle --help/--version while keeping exit codes predictable in tests.
+        return int(exc.code) if isinstance(exc.code, int) else 1
+
+    image_path = args.image.expanduser()
 
     if not image_path.exists():
         print(f"Could not find: {image_path}", file=sys.stderr)
@@ -56,7 +86,10 @@ def _run_cli(image_path: Path) -> int:
         print(f"Failed to extract report data: {exc}", file=sys.stderr)
         return 1
 
-    print(_format_result(result))
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+    else:
+        print(_format_result(result))
     return 0
 
 
@@ -65,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = list(argv or sys.argv[1:])
     if args:
-        return _run_cli(Path(args[0]))
+        return _run_cli(args)
 
     try:
         from tkinter import Tk, messagebox

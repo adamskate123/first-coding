@@ -29,6 +29,24 @@ def test_cli_prints_results(tmp_path, monkeypatch, capsys):
     assert captured.err == ""
 
 
+def test_cli_json_output(tmp_path, monkeypatch, capsys):
+    image_path = tmp_path / "report.png"
+    image_path.write_bytes(b"")
+
+    result = ExtractionResult(patient="Grace", gene="CFTR")
+
+    monkeypatch.setattr(app, "extract_from_image", lambda path: result)
+
+    exit_code = app.main(["--json", str(image_path)])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "\n" in captured.out  # pretty-printed JSON contains newlines
+    assert "Grace" in captured.out
+    assert "CFTR" in captured.out
+
+
 def test_cli_missing_file(tmp_path, capsys):
     missing_path = tmp_path / "missing.png"
 
