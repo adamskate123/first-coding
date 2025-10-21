@@ -80,3 +80,17 @@ def test_parse_report_text_handles_table_rows_without_headings() -> None:
     assert result.variant == "c.5266dupC"
     assert result.zygosity == "Heterozygous"
     assert result.interpretation == "Pathogenic"
+
+
+def test_parse_report_text_tolerates_misspelled_headings() -> None:
+    sample_text = (
+        "Patient: Jane Doe\n"
+        "Gene: CFTR\n"
+        "Varient - Missense substitution detected\n"
+        "Interpretaion: Pathogenic variant observed.\n"
+    )
+
+    result = grp.parse_report_text(sample_text)
+
+    assert result.variant == "Missense substitution detected"
+    assert result.interpretation == "Pathogenic variant observed"
