@@ -22,6 +22,7 @@ import argparse
 import json
 import re
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Set
 
@@ -34,6 +35,11 @@ try:  # pragma: no cover - import availability depends on environment
     import pytesseract  # type: ignore
 except ImportError:  # pragma: no cover - handled lazily in _ensure_ocr_dependencies
     pytesseract = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency for fuzzy label matching
+    from rapidfuzz import process as rapidfuzz_process
+except ImportError:  # pragma: no cover - fuzzy matching remains optional
+    rapidfuzz_process = None  # type: ignore[assignment]
 
 
 def _ensure_ocr_dependencies() -> None:
@@ -77,13 +83,79 @@ class ExtractionResult:
         }
 
 
-def _extract_first_match(text: str, patterns: Iterable[str]) -> Optional[str]:
+PatternType = Union[str, Tuple[str, str]]
+
+
+def _extract_first_match(text: str, patterns: Iterable[PatternType]) -> Optional[str]:
+    """Search *text* for the first regex pattern, allowing fuzzy label matching."""
+
+    lines = text.splitlines()
+    line_headings = []
+    line_prefixes: list[Optional[str]] = []
+    for line in lines:
+        delimiter_match = re.search(r"[:\-]", line)
+        if delimiter_match:
+            prefix = line[: delimiter_match.start()]
+            line_headings.append(prefix.strip())
+            line_prefixes.append(prefix)
+        else:
+            line_headings.append(line.strip())
+            line_prefixes.append(None)
     for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE)
-        if match:
-            # Strip trailing punctuation and whitespace to keep values tidy.
-            value = match.group("value").strip().rstrip(",;.")
-            return value or None
+        label: Optional[str]
+        regex: str
+
+        if isinstance(pattern, tuple):
+            label, regex = pattern
+        else:
+            label = None
+            regex = pattern
+
+        search_targets = []
+        fuzzy_result = None
+        fuzzy_index: Optional[int] = None
+        if label:
+            if rapidfuzz_process is not None:
+                fuzzy_result = rapidfuzz_process.extractOne(label, line_headings, score_cutoff=80)
+                if fuzzy_result:
+                    _, _, fuzzy_index = fuzzy_result
+            else:
+                best_score = 0.0
+                best_index: Optional[int] = None
+                for idx, heading in enumerate(line_headings):
+                    if not heading:
+                        continue
+                    score = SequenceMatcher(None, label.lower(), heading.lower()).ratio()
+                    if score >= 0.8 and score > best_score:
+                        best_score = score
+                        best_index = idx
+                fuzzy_index = best_index
+
+        if fuzzy_index is not None:
+            line_idx = fuzzy_index
+            segment_lines = []
+            normalized_line = lines[line_idx]
+            prefix = line_prefixes[line_idx]
+            if prefix is not None and label:
+                normalized_line = label + normalized_line[len(prefix) :]
+            segment_lines.append(normalized_line)
+            if line_idx + 1 < len(lines):
+                segment_lines.append(lines[line_idx + 1])
+            search_targets.append("\n".join(segment_lines))
+
+        search_targets.append(text)
+
+        seen_targets = set()
+        for target in search_targets:
+            if target in seen_targets:
+                continue
+            seen_targets.add(target)
+
+            match = re.search(regex, target, flags=re.IGNORECASE | re.MULTILINE)
+            if match:
+                # Strip trailing punctuation and whitespace to keep values tidy.
+                value = match.group("value").strip().rstrip(",;.")
+                return value or None
     return None
 
 
@@ -220,59 +292,59 @@ def parse_report_text(text: str) -> ExtractionResult:
     patient = _extract_first_match(
         text,
         (
-            r"Patient(?: Name)?\s*[:\-]\s*(?P<value>.+)",
+            ("Patient", r"Patient(?: Name)?\s*[:\-]\s*(?P<value>.+)"),
             r"Name\s*[:\-]\s*(?P<value>.+)",
         ),
     )
     dob = _extract_first_match(
         text,
         (
-            r"Date\s*of\s*Birth\s*[:\-]\s*(?P<value>[0-9/\-]+)",
+            ("Date of Birth", r"Date\s*of\s*Birth\s*[:\-]\s*(?P<value>[0-9/\-]+)"),
             r"DOB\s*[:\-]\s*(?P<value>[0-9/\-]+)",
         ),
     )
     mrn = _extract_first_match(
         text,
         (
-            r"MRN\s*[:\-]\s*(?P<value>[A-Za-z0-9\-]+)",
-            r"Medical\s*Record\s*Number\s*[:\-]\s*(?P<value>[A-Za-z0-9\-]+)",
+            ("MRN", r"MRN\s*[:\-]\s*(?P<value>[A-Za-z0-9\-]+)"),
+            ("Medical Record Number", r"Medical\s*Record\s*Number\s*[:\-]\s*(?P<value>[A-Za-z0-9\-]+)"),
         ),
     )
 
     gene = _extract_first_match(
         text,
         (
-            r"Gene\s*[:\-]\s*(?P<value>[A-Za-z0-9\-]+)",
-            r"Analyzed\s*Gene\s*[:\-]\s*(?P<value>[A-Za-z0-9\-]+)",
+            ("Gene", r"Gene\s*[:\-]\s*(?P<value>[A-Za-z0-9\-]+)"),
+            ("Gene", r"Analyzed\s*Gene\s*[:\-]\s*(?P<value>[A-Za-z0-9\-]+)"),
         ),
     )
     transcript = _extract_first_match(
         text,
         (
-            r"Transcript\s*[:\-]\s*(?P<value>[A-Z0-9_\.]+)",
-            r"Ref(?:erence)?\s*Transcript\s*[:\-]\s*(?P<value>[A-Z0-9_\.]+)",
+            ("Transcript", r"Transcript\s*[:\-]\s*(?P<value>[A-Z0-9_\.]+)"),
+            ("Transcript", r"Ref(?:erence)?\s*Transcript\s*[:\-]\s*(?P<value>[A-Z0-9_\.]+)"),
         ),
     )
     variant = _extract_first_match(
         text,
         (
-            r"Variant\s*[:\-]\s*(?P<value>.+)",
+            ("Variant", r"Variant\s*[:\-]\s*(?P<value>.+)"),
             r"c\.(?P<value>[A-Za-z0-9_>\-+/]+)",
         ),
     )
     zygosity = _extract_first_match(
         text,
         (
-            r"Zygosity\s*[:\-]\s*(?P<value>.+)",
+            ("Zygosity", r"Zygosity\s*[:\-]\s*(?P<value>.+)"),
             r"(?P<value>Homozygous|Heterozygous|Hemizygous)",
         ),
     )
     interpretation = _extract_first_match(
         text,
         (
-            r"Interpretation\s*[:\-]\s*(?P<value>.+)",
-            r"Assessment\s*[:\-]\s*(?P<value>.+)",
-            r"Classification\s*[:\-]\s*(?P<value>.+)",
+            ("Interpretation", r"Interpretation\s*[:\-]\s*(?P<value>.+)"),
+            ("Assessment", r"Assessment\s*[:\-]\s*(?P<value>.+)"),
+            ("Classification", r"Classification\s*[:\-]\s*(?P<value>.+)"),
         ),
     )
 
