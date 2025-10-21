@@ -38,25 +38,15 @@ python genetics_report_parser.py /path/to/report.png
 
 Add `--json` to receive the parsed information in JSON form.
 
-### Building a macOS app bundle (.dmg)
+### Running the web application
 
-The repository ships with a `setup.py` configured for
-[py2app](https://py2app.readthedocs.io/) so the extractor can be packaged as a
-macOS application:
+Start the Flask server to use the browser-based interface:
 
-1. Install the build dependency (only needed on macOS):
+```bash
+python genetics_report_web.py
+```
 
-   ```bash
-   python -m pip install -r requirements.txt
-   ```
-
-2. Run py2app to create both a `.app` bundle and a `.dmg` disk image:
-
-   ```bash
-   python setup.py py2app
-   ```
-
-   The generated artifacts live in `dist/` (`Genetics Report Extractor.app` and
-   `Genetics Report Extractor.dmg`). The application launches the
-   `genetics_report_app.py` GUI, prompting the user to pick an image and showing
-   the parsed results.
+The server listens on `http://127.0.0.1:5000/` by default. Open that address in
+your browser, upload a genetics report image, and the page will display the
+extracted data directly below the upload form. The parser still requires the
+`tesseract` binary to be installed and accessible from your system `PATH`.

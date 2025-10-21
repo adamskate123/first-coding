@@ -1,4 +1,4 @@
 pillow
 pytesseract
+Flask
 pytest
-py2app; sys_platform == "darwin"
