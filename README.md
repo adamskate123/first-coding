@@ -6,7 +6,10 @@ Simple projects for getting started.
 
 This repository includes `genetics_report_parser.py`, a command line utility
 that performs OCR on a clinical genetics report screenshot and extracts common
-fields such as the patient, gene, variant, and interpretation values.
+fields such as the patient, gene, variant, and interpretation values. The
+parser combines label-based extraction with table-style fallbacks so it keeps
+working even when column headers are faint, cropped, or lost in low quality
+scans.
 
 ### Prerequisites
 

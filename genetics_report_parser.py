@@ -87,6 +87,90 @@ def _extract_first_match(text: str, patterns: Iterable[str]) -> Optional[str]:
     return None
 
 
+def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
+    """Fallback heuristics for low quality reports with missing headings."""
+
+    gene_pattern = re.compile(r"\b([A-Z0-9]{2,})\b")
+    transcript_pattern = re.compile(r"\b((?:NM|NC|LRG|ENST)[0-9._]+)\b", re.IGNORECASE)
+    variant_pattern = re.compile(r"(c\.[A-Za-z0-9_>+\-/]+|p\.[A-Za-z0-9_>+\-/]+)")
+    zygosity_pattern = re.compile(r"\b(Heterozygous|Homozygous|Hemizygous)\b", re.IGNORECASE)
+
+    interpretation_keywords = {
+        "pathogenic": "Pathogenic",
+        "likely pathogenic": "Likely pathogenic",
+        "variant of uncertain significance": "Variant of Uncertain Significance",
+        "uncertain significance": "Variant of Uncertain Significance",
+        "vus": "Variant of Uncertain Significance",
+        "likely benign": "Likely benign",
+        "benign": "Benign",
+        "risk factor": "Risk factor",
+    }
+
+    fallback: Dict[str, Optional[str]] = {
+        "gene": None,
+        "transcript": None,
+        "variant": None,
+        "zygosity": None,
+        "interpretation": None,
+    }
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for idx, line in enumerate(lines):
+        variant_match = variant_pattern.search(line)
+        if not variant_match:
+            continue
+
+        fallback_variant = variant_match.group(1)
+        fallback_gene: Optional[str] = None
+        fallback_transcript: Optional[str] = None
+        fallback_zygosity: Optional[str] = None
+        fallback_interpretation: Optional[str] = None
+
+        # Look backward in the same line for a gene symbol.
+        prior_text = line[: variant_match.start()]
+        for gene_match in gene_pattern.finditer(prior_text):
+            fallback_gene = gene_match.group(1)
+
+        # Transcript can appear either before or after the variant token.
+        transcript_match = transcript_pattern.search(line)
+        if transcript_match:
+            fallback_transcript = transcript_match.group(1)
+
+        zygosity_match = zygosity_pattern.search(line)
+        if zygosity_match:
+            fallback_zygosity = zygosity_match.group(1).title()
+
+        lowered_line = line.lower()
+        for keyword, canonical in interpretation_keywords.items():
+            if keyword in lowered_line:
+                fallback_interpretation = canonical
+                break
+
+        # Interpretation is sometimes wrapped to the following line.
+        if fallback_interpretation is None and idx + 1 < len(lines):
+            next_line_lower = lines[idx + 1].lower()
+            for keyword, canonical in interpretation_keywords.items():
+                if keyword in next_line_lower:
+                    fallback_interpretation = canonical
+                    break
+
+        fallback.update(
+            {
+                "gene": fallback.get("gene") or fallback_gene,
+                "transcript": fallback.get("transcript") or fallback_transcript,
+                "variant": fallback.get("variant") or fallback_variant,
+                "zygosity": fallback.get("zygosity") or fallback_zygosity,
+                "interpretation": fallback.get("interpretation") or fallback_interpretation,
+            }
+        )
+
+        # Stop early if we've collected everything.
+        if all(fallback.values()):
+            break
+
+    return fallback
+
+
 def parse_report_text(text: str) -> ExtractionResult:
     """Parse OCR text from a clinical genetics report.
 
@@ -154,7 +238,7 @@ def parse_report_text(text: str) -> ExtractionResult:
         ),
     )
 
-    return ExtractionResult(
+    result = ExtractionResult(
         patient=patient,
         date_of_birth=dob,
         medical_record_number=mrn,
@@ -164,6 +248,28 @@ def parse_report_text(text: str) -> ExtractionResult:
         zygosity=zygosity,
         interpretation=interpretation,
     )
+
+    # Apply fallback heuristics for cases where column headers were not captured
+    # cleanly in the OCR output (e.g., faxed or low contrast scans).
+    table_like_fields = _extract_table_like_fields(text)
+    if result.gene is None and table_like_fields["gene"]:
+        result.gene = table_like_fields["gene"]
+    if result.transcript is None and table_like_fields["transcript"]:
+        result.transcript = table_like_fields["transcript"]
+    if table_like_fields["variant"]:
+        if result.variant is None:
+            result.variant = table_like_fields["variant"]
+        else:
+            current = result.variant.lower()
+            candidate = table_like_fields["variant"].lower()
+            if candidate.startswith(("c.", "p.")) and not current.startswith(("c.", "p.")):
+                result.variant = table_like_fields["variant"]
+    if result.zygosity is None and table_like_fields["zygosity"]:
+        result.zygosity = table_like_fields["zygosity"]
+    if result.interpretation is None and table_like_fields["interpretation"]:
+        result.interpretation = table_like_fields["interpretation"]
+
+    return result
 
 
 def perform_ocr(image_path: Path) -> str:

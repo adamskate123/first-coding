@@ -64,3 +64,19 @@ def test_perform_ocr_requires_dependencies(monkeypatch, tmp_path: Path) -> None:
         assert "Missing dependencies" in str(exc)
     else:  # pragma: no cover - ensure the SystemExit is raised
         raise AssertionError("Expected SystemExit when OCR dependencies are missing")
+
+
+def test_parse_report_text_handles_table_rows_without_headings() -> None:
+    sample_text = (
+        "Patient Jane Doe\n"
+        "BRCA1 NM_007294.3 c.5266dupC Pathogenic Heterozygous\n"
+        "Follow up recommended\n"
+    )
+
+    result = grp.parse_report_text(sample_text)
+
+    assert result.gene == "BRCA1"
+    assert result.transcript == "NM_007294.3"
+    assert result.variant == "c.5266dupC"
+    assert result.zygosity == "Heterozygous"
+    assert result.interpretation == "Pathogenic"
