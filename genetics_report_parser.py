@@ -24,7 +24,7 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple, Union
+from typing import Dict, Iterable, Optional, Set
 
 try:  # pragma: no cover - import availability depends on environment
     from PIL import Image  # type: ignore
@@ -159,6 +159,40 @@ def _extract_first_match(text: str, patterns: Iterable[PatternType]) -> Optional
     return None
 
 
+def _load_gene_symbols() -> Set[str]:
+    """Load a lightweight list of approved gene symbols."""
+
+    data_path = Path(__file__).resolve().parent / "data" / "hgnc_symbols.txt"
+    try:
+        lines = data_path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:  # pragma: no cover - defensive fallback
+        return set()
+
+    symbols = {line.strip() for line in lines if line.strip() and not line.startswith("#")}
+    return symbols
+
+
+_GENE_SYMBOLS = _load_gene_symbols()
+
+
+def _is_plausible_gene_symbol(candidate: str) -> bool:
+    """Return True if the candidate looks like a genuine gene symbol."""
+
+    if candidate in _GENE_SYMBOLS:
+        return True
+
+    # Fall back to a strict heuristic: allow short, all-uppercase tokens that
+    # include at least one digit (e.g. PIK3CA) when the curated list is missing
+    # an entry. This keeps obviously generic words such as LIKELY or PATHOGENIC
+    # from being treated as genes.
+    return (
+        candidate.isalnum()
+        and candidate.isupper()
+        and 3 <= len(candidate) <= 6
+        and any(ch.isdigit() for ch in candidate)
+    )
+
+
 def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
     """Fallback heuristics for low quality reports with missing headings."""
 
@@ -200,8 +234,12 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
 
         # Look backward in the same line for a gene symbol.
         prior_text = line[: variant_match.start()]
-        for gene_match in gene_pattern.finditer(prior_text):
-            fallback_gene = gene_match.group(1)
+        prior_gene_matches = list(gene_pattern.finditer(prior_text))
+        for gene_match in reversed(prior_gene_matches):
+            candidate = gene_match.group(1)
+            if _is_plausible_gene_symbol(candidate):
+                fallback_gene = candidate
+                break
 
         # Transcript can appear either before or after the variant token.
         transcript_match = transcript_pattern.search(line)

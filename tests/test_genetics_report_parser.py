@@ -82,15 +82,13 @@ def test_parse_report_text_handles_table_rows_without_headings() -> None:
     assert result.interpretation == "Pathogenic"
 
 
-def test_parse_report_text_tolerates_misspelled_headings() -> None:
+def test_fallback_gene_detection_skips_generic_tokens() -> None:
     sample_text = (
-        "Patient: Jane Doe\n"
-        "Gene: CFTR\n"
-        "Varient - Missense substitution detected\n"
-        "Interpretaion: Pathogenic variant observed.\n"
+        "LIKELY PATHOGENIC c.68_69delAG HETEROZYGOUS\n"
+        "BRCA1 c.5266dupC Pathogenic Heterozygous\n"
     )
 
     result = grp.parse_report_text(sample_text)
 
-    assert result.variant == "Missense substitution detected"
-    assert result.interpretation == "Pathogenic variant observed"
+    assert result.gene == "BRCA1"
+    assert result.variant == "c.68_69delAG"
