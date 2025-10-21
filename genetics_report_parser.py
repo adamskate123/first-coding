@@ -24,7 +24,7 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Set
+from typing import Dict, Iterable, Optional, Set, Tuple, Union
 
 try:  # pragma: no cover - import availability depends on environment
     from PIL import Image  # type: ignore
