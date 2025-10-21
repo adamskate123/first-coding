@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from tkinter import Tk, filedialog, messagebox
+from typing import TYPE_CHECKING
 
 from genetics_report_parser import ExtractionResult, extract_from_image
+
+if TYPE_CHECKING:  # pragma: no cover - used only for typing support
+    from tkinter import Tk
 
 
 def _format_result(result: ExtractionResult) -> str:
@@ -19,8 +22,10 @@ def _format_result(result: ExtractionResult) -> str:
     return "\n".join(lines)
 
 
-def _select_image_from_dialog(root: Tk) -> Path | None:
+def _select_image_from_dialog(root: "Tk") -> Path | None:
     """Open a file chooser dialog and return the selected path."""
+
+    from tkinter import filedialog
 
     file_path = filedialog.askopenfilename(
         title="Select a genetics report screenshot",
@@ -35,20 +40,61 @@ def _select_image_from_dialog(root: Tk) -> Path | None:
     return Path(file_path)
 
 
+def _run_cli(image_path: Path) -> int:
+    """Execute the extraction logic without launching the GUI."""
+
+    if not image_path.exists():
+        print(f"Could not find: {image_path}", file=sys.stderr)
+        return 1
+
+    try:
+        result = extract_from_image(image_path)
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        return int(exc.code) if isinstance(exc.code, int) else 1
+    except Exception as exc:  # pragma: no cover - CLI specific failure path
+        print(f"Failed to extract report data: {exc}", file=sys.stderr)
+        return 1
+
+    print(_format_result(result))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the GUI app."""
 
-    root = Tk()
-    root.withdraw()  # Hide the root window as we only need dialogs.
-
     args = list(argv or sys.argv[1:])
     if args:
-        image_path = Path(args[0])
-    else:
-        image_path = _select_image_from_dialog(root)
-        if image_path is None:
-            root.destroy()
-            return 0
+        return _run_cli(Path(args[0]))
+
+    try:
+        from tkinter import Tk, messagebox
+    except Exception as exc:  # pragma: no cover - platform specific failure path
+        print(
+            "The graphical interface is unavailable (tkinter could not be initialized). "
+            "Run `python genetics_report_parser.py <image_path>` instead. "
+            f"Details: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        root = Tk()
+    except Exception as exc:  # pragma: no cover - platform specific failure path
+        print(
+            "The graphical interface is unavailable on this system. "
+            "Run `python genetics_report_parser.py <image_path>` instead. "
+            f"Details: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    root.withdraw()  # Hide the root window as we only need dialogs.
+
+    image_path = _select_image_from_dialog(root)
+    if image_path is None:
+        root.destroy()
+        return 0
 
     if not image_path.exists():
         messagebox.showerror("File not found", f"Could not find: {image_path}", parent=root)
