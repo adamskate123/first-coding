@@ -9,9 +9,9 @@ This repository now includes:
 * `genetics_report_parser.py`, a command line utility that performs OCR on a
   clinical genetics report screenshot and extracts common details such as the
   gene, variant, and interpretation.
-* `genetics_report_web.py`, a lightweight Flask web application that lets you
-  upload a genetics report screenshot from your browser and view the extracted
-  information.
+* `genetics_report_app.py`, a tiny Tkinter GUI that wraps the same
+  functionality so it can be bundled as a double-clickable macOS application
+  and distributed as a `.dmg` disk image.
 
 ### Setup
 
