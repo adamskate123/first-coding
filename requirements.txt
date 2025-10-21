@@ -1,0 +1,4 @@
+pillow
+pytesseract
+pytest
+py2app; sys_platform == "darwin"
