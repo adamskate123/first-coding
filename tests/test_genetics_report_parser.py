@@ -122,6 +122,15 @@ def test_parse_report_text_handles_parenthesized_protein_variant_only() -> None:
     assert result.variant_normalization_succeeded in {True, False}
 
 
+def test_parse_report_text_preserves_variant_with_internal_spaces() -> None:
+    sample_text = "Variant: FGF12: c.334 G>A, p.G112S\n"
+
+    result = grp.parse_report_text(sample_text)
+
+    assert result.variant == "c.334G>A"
+    assert result.variant_normalization_succeeded in {True, False}
+
+
 def test_parse_report_text_uses_remote_validation_for_multiple_candidates(monkeypatch) -> None:
     sample_text = "Variant: c.123A>T p.Gly41Val\n"
 

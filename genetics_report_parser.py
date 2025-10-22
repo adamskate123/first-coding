@@ -340,8 +340,22 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
 
     gene_pattern = re.compile(r"\b([A-Z0-9]{2,})\b")
     transcript_pattern = re.compile(r"\b((?:NM|NC|LRG|ENST)[0-9._]+)\b", re.IGNORECASE)
+    base_token = r"[A-Za-z0-9_>+\-/]+"
+    spaced_tokens = rf"(?:\s+(?![cp]\.){base_token})*"
     variant_pattern = re.compile(
-        r"(c\.[A-Za-z0-9_>+\-/]+|p\.(?:\([A-Za-z0-9_>+\-/]+\)|[A-Za-z0-9_>+\-/]+))"
+        rf"""
+        (
+            c\.\s*{base_token}{spaced_tokens}
+            |
+            p\.\s*
+            (?:
+                \(\s*{base_token}{spaced_tokens}\)
+                |
+                {base_token}{spaced_tokens}
+            )
+        )
+        """,
+        re.VERBOSE,
     )
     zygosity_pattern = re.compile(r"\b(Heterozygous|Homozygous|Hemizygous)\b", re.IGNORECASE)
 
@@ -370,7 +384,7 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
         if not variant_match:
             continue
 
-        candidate_variant = variant_match.group(1)
+        candidate_variant = re.sub(r"\s+", "", variant_match.group(1))
         fallback_variant = (
             candidate_variant if _is_valid_variant_candidate(candidate_variant) else None
         )
@@ -431,10 +445,26 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
 def _extract_variant_tokens(value: str) -> List[str]:
     """Return individual HGVS-like tokens from a combined variant string."""
 
+    base_token = r"[A-Za-z0-9_>+\-/]+"
+    spaced_tokens = rf"(?:\s+(?![cp]\.){base_token})*"
     variant_pattern = re.compile(
-        r"(NM_[0-9.]+:[cp]\.[A-Za-z0-9_>+\-/]+|c\.[A-Za-z0-9_>+\-/]+|p\.(?:\([A-Za-z0-9_>+\-/]+\)|[A-Za-z0-9_>+\-/]+))",
+        rf"""
+        (
+            NM_[0-9.]+:\s*[cp]\.\s*{base_token}{spaced_tokens}
+            |
+            c\.\s*{base_token}{spaced_tokens}
+            |
+            p\.\s*
+            (?:
+                \(\s*{base_token}{spaced_tokens}\)
+                |
+                {base_token}{spaced_tokens}
+            )
+        )
+        """,
+        re.VERBOSE,
     )
-    tokens = [match.group(1) for match in variant_pattern.finditer(value)]
+    tokens = [re.sub(r"\s+", "", match.group(1)) for match in variant_pattern.finditer(value)]
     if not tokens and value.strip():
         tokens.append(value.strip())
     return tokens
