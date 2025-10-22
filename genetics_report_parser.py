@@ -24,7 +24,7 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Set, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 try:  # pragma: no cover - import availability depends on environment
     from PIL import Image  # type: ignore
@@ -81,6 +81,39 @@ class ExtractionResult:
             "zygosity": self.zygosity,
             "interpretation": self.interpretation,
         }
+
+
+@dataclass
+class OCRWord:
+    """Lightweight representation of a recognised OCR word and its bounds."""
+
+    text: str
+    left: int
+    top: int
+    width: int
+    height: int
+    conf: float
+    page_num: int
+    block_num: int
+    par_num: int
+    line_num: int
+    word_num: int
+
+    @property
+    def right(self) -> int:
+        return self.left + self.width
+
+    @property
+    def bottom(self) -> int:
+        return self.top + self.height
+
+
+@dataclass
+class OCRResult:
+    """Container for OCR output that includes optional layout metadata."""
+
+    text: str
+    layout: Optional[List[OCRWord]] = None
 
 
 PatternType = Union[str, Tuple[str, str]]
@@ -283,6 +316,89 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
     return fallback
 
 
+def _clean_layout_token(token: str) -> str:
+    """Normalise OCR tokens by stripping stray punctuation."""
+
+    return token.strip().strip(":")
+
+
+def _extract_fields_with_layout(layout: Sequence[OCRWord]) -> Dict[str, Optional[str]]:
+    """Extract structured fields using OCR layout metadata."""
+
+    if not layout:
+        return {"variant": None}
+
+    variant_pattern = re.compile(
+        r"(c\.[A-Za-z0-9_>+\-/]+|p\.(?:\([A-Za-z0-9_>+\-/]+\)|[A-Za-z0-9_>+\-/]+))"
+    )
+
+    sorted_layout = sorted(layout, key=lambda word: (word.page_num, word.top, word.left, word.word_num))
+
+    def _search_row(words: Iterable[OCRWord]) -> Optional[str]:
+        joined = " ".join(_clean_layout_token(word.text) for word in words if _clean_layout_token(word.text))
+        if not joined:
+            return None
+        match = variant_pattern.search(joined)
+        if match:
+            return match.group(1)
+        return None
+
+    for word in sorted_layout:
+        normalized = _clean_layout_token(word.text).lower()
+        if normalized != "variant":
+            continue
+
+        label_right = word.right
+        label_left = word.left
+        label_bottom = word.bottom
+
+        same_line_words = [
+            candidate
+            for candidate in sorted_layout
+            if candidate.page_num == word.page_num
+            and candidate.block_num == word.block_num
+            and candidate.par_num == word.par_num
+            and candidate.line_num == word.line_num
+            and candidate.left >= label_right - 5
+        ]
+        same_line_words.sort(key=lambda candidate: candidate.left)
+        variant_value = _search_row(same_line_words)
+        if variant_value:
+            return {"variant": variant_value}
+
+        column_left = label_left - max(5, int(word.width * 0.3))
+        column_right = label_right + max(5, int(word.width * 0.3))
+        column_candidates = [
+            candidate
+            for candidate in sorted_layout
+            if candidate.page_num == word.page_num
+            and candidate.top > label_bottom
+            and column_left <= (candidate.left + candidate.right) / 2 <= column_right
+        ]
+
+        if not column_candidates:
+            continue
+
+        column_candidates.sort(key=lambda candidate: (candidate.top, candidate.left))
+        row_top = column_candidates[0].top
+        vertical_tolerance = max(5, int(word.height * 0.75))
+
+        row_words = [
+            candidate
+            for candidate in sorted_layout
+            if candidate.page_num == word.page_num
+            and abs(candidate.top - row_top) <= vertical_tolerance
+            and candidate.left >= label_left - max(5, int(word.width * 0.3))
+        ]
+        row_words.sort(key=lambda candidate: (candidate.top, candidate.left))
+
+        variant_value = _search_row(row_words)
+        if variant_value:
+            return {"variant": variant_value}
+
+    return {"variant": None}
+
+
 def parse_report_text(text: str) -> ExtractionResult:
     """Parse OCR text from a clinical genetics report.
 
@@ -384,20 +500,66 @@ def parse_report_text(text: str) -> ExtractionResult:
     return result
 
 
-def perform_ocr(image_path: Path) -> str:
-    """Run OCR on the supplied image path and return the recognised text."""
+def perform_ocr(image_path: Path, *, include_layout: bool = False) -> OCRResult:
+    """Run OCR on *image_path* and optionally capture layout metadata."""
 
     _ensure_ocr_dependencies()
 
+    layout_words: Optional[List[OCRWord]] = None
+
     with Image.open(image_path) as image:
-        return pytesseract.image_to_string(image)
+        text = pytesseract.image_to_string(image)
+
+        if include_layout:
+            try:
+                output_dict = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+            except AttributeError:  # pragma: no cover - safety net for unexpected pytesseract builds
+                layout_words = None
+            else:
+                layout_words = []
+                entries = len(output_dict.get("text", []))
+                page_numbers = output_dict.get("page_num", [1] * entries)
+                block_numbers = output_dict.get("block_num", [0] * entries)
+                paragraph_numbers = output_dict.get("par_num", [0] * entries)
+                line_numbers = output_dict.get("line_num", [0] * entries)
+                word_numbers = output_dict.get("word_num", [0] * entries)
+
+                for idx in range(entries):
+                    raw_text = output_dict["text"][idx]
+                    if not raw_text or not raw_text.strip():
+                        continue
+
+                    layout_words.append(
+                        OCRWord(
+                            text=raw_text.strip(),
+                            left=int(output_dict["left"][idx]),
+                            top=int(output_dict["top"][idx]),
+                            width=int(output_dict["width"][idx]),
+                            height=int(output_dict["height"][idx]),
+                            conf=float(output_dict["conf"][idx]),
+                            page_num=int(page_numbers[idx]),
+                            block_num=int(block_numbers[idx]),
+                            par_num=int(paragraph_numbers[idx]),
+                            line_num=int(line_numbers[idx]),
+                            word_num=int(word_numbers[idx]),
+                        )
+                    )
+
+    return OCRResult(text=text, layout=layout_words)
 
 
-def extract_from_image(image_path: Path) -> ExtractionResult:
+def extract_from_image(image_path: Path, *, use_layout: bool = False) -> ExtractionResult:
     """Extract key fields from a genetics report screenshot."""
 
-    text = perform_ocr(image_path)
-    return parse_report_text(text)
+    ocr_result = perform_ocr(image_path, include_layout=use_layout)
+    result = parse_report_text(ocr_result.text)
+
+    if use_layout and ocr_result.layout:
+        layout_fields = _extract_fields_with_layout(ocr_result.layout)
+        if layout_fields.get("variant"):
+            result.variant = layout_fields["variant"]
+
+    return result
 
 
 def main() -> None:
@@ -414,12 +576,17 @@ def main() -> None:
         action="store_true",
         help="Output the extracted data as JSON instead of human readable text.",
     )
+    parser.add_argument(
+        "--layout-aware",
+        action="store_true",
+        help="Use layout-aware OCR parsing to refine structured field extraction.",
+    )
     args = parser.parse_args()
 
     if not args.image.exists():
         raise SystemExit(f"File not found: {args.image}")
 
-    result = extract_from_image(args.image)
+    result = extract_from_image(args.image, use_layout=args.layout_aware)
 
     if args.json:
         print(json.dumps(result.to_dict(), indent=2))

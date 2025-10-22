@@ -38,11 +38,14 @@ def test_extract_from_image_uses_ocr_result(monkeypatch, tmp_path: Path) -> None
     image_path = tmp_path / "report.png"
     image_path.write_bytes(b"")
 
-    monkeypatch.setattr(
-        grp,
-        "perform_ocr",
-        lambda path: "Patient Name: John Smith\nGene: BRCA1\nVariant: c.68_69delAG",
-    )
+    def fake_perform_ocr(path: Path, include_layout: bool = False) -> grp.OCRResult:
+        assert include_layout is False
+        return grp.OCRResult(
+            text="Patient Name: John Smith\nGene: BRCA1\nVariant: c.68_69delAG",
+            layout=None,
+        )
+
+    monkeypatch.setattr(grp, "perform_ocr", fake_perform_ocr)
 
     result = grp.extract_from_image(image_path)
 
@@ -100,3 +103,60 @@ def test_parse_report_text_handles_parenthesized_protein_variant_only() -> None:
     result = grp.parse_report_text(sample_text)
 
     assert result.variant == "p.(Gly12Asp)"
+
+
+def test_extract_from_image_uses_layout_when_requested(monkeypatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "report.png"
+    image_path.write_bytes(b"")
+
+    layout = [
+        grp.OCRWord(
+            text="Variant",
+            left=10,
+            top=10,
+            width=50,
+            height=15,
+            conf=95.0,
+            page_num=1,
+            block_num=1,
+            par_num=1,
+            line_num=1,
+            word_num=1,
+        ),
+        grp.OCRWord(
+            text=":",
+            left=65,
+            top=10,
+            width=5,
+            height=15,
+            conf=92.0,
+            page_num=1,
+            block_num=1,
+            par_num=1,
+            line_num=1,
+            word_num=2,
+        ),
+        grp.OCRWord(
+            text="c.123A>T",
+            left=75,
+            top=10,
+            width=80,
+            height=15,
+            conf=90.0,
+            page_num=1,
+            block_num=1,
+            par_num=1,
+            line_num=1,
+            word_num=3,
+        ),
+    ]
+
+    def fake_perform_ocr(path: Path, include_layout: bool = False) -> grp.OCRResult:
+        assert include_layout is True
+        return grp.OCRResult(text="Variant: value not captured", layout=layout)
+
+    monkeypatch.setattr(grp, "perform_ocr", fake_perform_ocr)
+
+    result = grp.extract_from_image(image_path, use_layout=True)
+
+    assert result.variant == "c.123A>T"
