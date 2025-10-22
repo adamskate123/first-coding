@@ -949,12 +949,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.image.exists():
-        raise SystemExit(f"File not found: {args.image}")
+    image_path = args.image.expanduser()
+
+    if not image_path.exists():
+        raise SystemExit(f"File not found: {image_path}")
 
     enable_validation = True if args.validate_variants else None
     result = extract_from_image(
-        args.image, enable_variant_validation=enable_validation
+        image_path, enable_variant_validation=enable_validation
     )
 
     if args.json:
