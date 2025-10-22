@@ -274,9 +274,45 @@ def _is_valid_variant_candidate(candidate: str) -> bool:
 
     if normalized.startswith(("p.", "P.")):
         amino_acid_tokens = re.findall(r"([A-Z][a-z]{2})", normalized)
-        if not amino_acid_tokens:
-            return False
-        return all(token in _AMINO_ACID_CODES for token in amino_acid_tokens)
+        if amino_acid_tokens:
+            return all(token in _AMINO_ACID_CODES for token in amino_acid_tokens)
+
+        # Fall back to single-letter HGVS substitutions like ``p.G112S``. The
+        # regex enforces the canonical structure (one amino-acid code, digits,
+        # one amino-acid code or ``*`` for stop) so that free-form phrases are
+        # still rejected.
+        single_letter_match = re.match(r"^p\.([A-Z])([0-9]+)([A-Z*])$", normalized)
+        if single_letter_match:
+            reference, _, alternate = single_letter_match.groups()
+            valid_single_letter_codes = {
+                "A",
+                "C",
+                "D",
+                "E",
+                "F",
+                "G",
+                "H",
+                "I",
+                "K",
+                "L",
+                "M",
+                "N",
+                "P",
+                "Q",
+                "R",
+                "S",
+                "T",
+                "V",
+                "W",
+                "Y",
+                "X",
+                "U",
+                "O",
+            }
+            if alternate == "*":
+                return reference in valid_single_letter_codes
+            return reference in valid_single_letter_codes and alternate in valid_single_letter_codes
+        return False
 
     return False
 
