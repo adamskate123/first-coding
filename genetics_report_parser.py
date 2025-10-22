@@ -33,9 +33,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 try:  # pragma: no cover - import availability depends on environment
-    from PIL import Image  # type: ignore
+    from PIL import Image, ImageFilter, ImageOps  # type: ignore
 except ImportError:  # pragma: no cover - handled lazily in _ensure_ocr_dependencies
     Image = None  # type: ignore[assignment]
+    ImageFilter = None  # type: ignore[assignment]
+    ImageOps = None  # type: ignore[assignment]
 
 try:  # pragma: no cover - import availability depends on environment
     import pytesseract  # type: ignore

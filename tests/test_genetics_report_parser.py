@@ -4,6 +4,13 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+try:  # pragma: no cover - Pillow is optional for the test environment
+    from PIL import Image
+except ImportError:  # pragma: no cover - handled via test skips when Pillow is absent
+    Image = None  # type: ignore[assignment]
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
