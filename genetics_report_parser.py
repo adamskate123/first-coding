@@ -172,7 +172,56 @@ def _load_gene_symbols() -> Set[str]:
     return symbols
 
 
+def _load_vocabulary_file(filename: str, *, lowercase: bool = False) -> Set[str]:
+    """Load a simple newline-delimited vocabulary from the data directory."""
+
+    data_path = Path(__file__).resolve().parent / "data" / filename
+    try:
+        lines = data_path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:  # pragma: no cover - defensive fallback
+        return set()
+
+    cleaned: Set[str] = set()
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if lowercase:
+            stripped = stripped.lower()
+        cleaned.add(stripped)
+    return cleaned
+
+
 _GENE_SYMBOLS = _load_gene_symbols()
+_AMINO_ACID_CODES = _load_vocabulary_file("amino_acids.txt")
+_PROHIBITED_VARIANT_SUBSTRINGS = _load_vocabulary_file(
+    "prohibited_variant_tokens.txt", lowercase=True
+)
+
+
+def _is_valid_variant_candidate(candidate: str) -> bool:
+    """Validate heuristic variant candidates against curated vocabularies."""
+
+    if not candidate:
+        return False
+
+    normalized = candidate.strip()
+    lowered = normalized.lower()
+
+    for forbidden in _PROHIBITED_VARIANT_SUBSTRINGS:
+        if forbidden in lowered:
+            return False
+
+    if normalized.startswith(("c.", "C.")):
+        return True
+
+    if normalized.startswith(("p.", "P.")):
+        amino_acid_tokens = re.findall(r"([A-Z][a-z]{2})", normalized)
+        if not amino_acid_tokens:
+            return False
+        return all(token in _AMINO_ACID_CODES for token in amino_acid_tokens)
+
+    return False
 
 
 def _is_plausible_gene_symbol(candidate: str) -> bool:
@@ -228,7 +277,10 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
         if not variant_match:
             continue
 
-        fallback_variant = variant_match.group(1)
+        candidate_variant = variant_match.group(1)
+        fallback_variant = (
+            candidate_variant if _is_valid_variant_candidate(candidate_variant) else None
+        )
         fallback_gene: Optional[str] = None
         fallback_transcript: Optional[str] = None
         fallback_zygosity: Optional[str] = None
@@ -368,14 +420,15 @@ def parse_report_text(text: str) -> ExtractionResult:
         result.gene = table_like_fields["gene"]
     if result.transcript is None and table_like_fields["transcript"]:
         result.transcript = table_like_fields["transcript"]
-    if table_like_fields["variant"]:
+    fallback_variant = table_like_fields["variant"]
+    if fallback_variant and _is_valid_variant_candidate(fallback_variant):
         if result.variant is None:
-            result.variant = table_like_fields["variant"]
+            result.variant = fallback_variant
         else:
             current = result.variant.lower()
-            candidate = table_like_fields["variant"].lower()
+            candidate = fallback_variant.lower()
             if candidate.startswith(("c.", "p.")) and not current.startswith(("c.", "p.")):
-                result.variant = table_like_fields["variant"]
+                result.variant = fallback_variant
     if result.zygosity is None and table_like_fields["zygosity"]:
         result.zygosity = table_like_fields["zygosity"]
     if result.interpretation is None and table_like_fields["interpretation"]:

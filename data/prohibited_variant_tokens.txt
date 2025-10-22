@@ -1,0 +1,8 @@
+# substrings that should disqualify variant candidates extracted heuristically
+artifact
+placeholder
+unknown
+pending
+lorem
+ipsum
+
