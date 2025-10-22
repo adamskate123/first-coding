@@ -59,7 +59,17 @@ PAGE_TEMPLATE = """
           {% for key, value in result.items() %}
             <tr>
               <th>{{ key.replace('_', ' ').title() }}</th>
-              <td>{{ value or 'Not found' }}</td>
+              <td>
+                {% if value is sameas true %}
+                  Yes
+                {% elif value is sameas false %}
+                  No
+                {% elif value %}
+                  {{ value }}
+                {% else %}
+                  Not found
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>

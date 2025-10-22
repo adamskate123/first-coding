@@ -46,6 +46,14 @@ try:  # pragma: no cover - optional dependency for fuzzy label matching
 except ImportError:  # pragma: no cover - fuzzy matching remains optional
     rapidfuzz_process = None  # type: ignore[assignment]
 
+try:  # pragma: no cover - optional dependency for HGVS parsing
+    from hgvs.parser import Parser as HgvsParser  # type: ignore
+except ImportError:  # pragma: no cover - normalization remains optional
+    HgvsParser = None  # type: ignore[assignment]
+    _HGVS_PARSER = None
+else:  # pragma: no cover - simple instantiation
+    _HGVS_PARSER = HgvsParser()
+
 
 _logger = logging.getLogger(__name__)
 
@@ -81,10 +89,11 @@ class ExtractionResult:
     gene: Optional[str] = None
     transcript: Optional[str] = None
     variant: Optional[str] = None
+    variant_normalization_succeeded: Optional[bool] = None
     zygosity: Optional[str] = None
     interpretation: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Optional[str]]:
+    def to_dict(self) -> Dict[str, Optional[Union[str, bool]]]:
         return {
             "patient": self.patient,
             "date_of_birth": self.date_of_birth,
@@ -92,6 +101,7 @@ class ExtractionResult:
             "gene": self.gene,
             "transcript": self.transcript,
             "variant": self.variant,
+            "variant_normalization_succeeded": self.variant_normalization_succeeded,
             "zygosity": self.zygosity,
             "interpretation": self.interpretation,
         }
@@ -386,7 +396,7 @@ def _extract_variant_tokens(value: str) -> List[str]:
     """Return individual HGVS-like tokens from a combined variant string."""
 
     variant_pattern = re.compile(
-        r"(c\.[A-Za-z0-9_>+\-/]+|p\.(?:\([A-Za-z0-9_>+\-/]+\)|[A-Za-z0-9_>+\-/]+))",
+        r"(NM_[0-9.]+:[cp]\.[A-Za-z0-9_>+\-/]+|c\.[A-Za-z0-9_>+\-/]+|p\.(?:\([A-Za-z0-9_>+\-/]+\)|[A-Za-z0-9_>+\-/]+))",
     )
     tokens = [match.group(1) for match in variant_pattern.finditer(value)]
     if not tokens and value.strip():
@@ -394,22 +404,31 @@ def _extract_variant_tokens(value: str) -> List[str]:
     return tokens
 
 
-def _normalize_hgvs_variant(value: str) -> Optional[str]:
-    """Return a lightly normalised HGVS string or ``None`` when it looks invalid."""
+def _normalize_variant(value: str) -> Optional[Tuple[Optional[str], str]]:
+    """Normalize an HGVS-like variant string using the optional HGVS parser."""
 
-    cleaned = value.strip()
-    if not cleaned:
+    if not value or _HGVS_PARSER is None:
         return None
 
-    cleaned = re.sub(r"\s+", "", cleaned)
+    candidate = value.strip()
+    if not candidate:
+        return None
 
-    if re.match(r"^(?:[cgnmpr]\.)", cleaned, re.IGNORECASE):
-        # Upper-case the prefix for consistency (e.g. c. -> c.) but keep body intact.
-        prefix, rest = cleaned[:2], cleaned[2:]
-        return prefix.lower() + rest
-    if re.match(r"^p\.\(", cleaned):
-        return cleaned
-    return None
+    try:
+        parsed = _HGVS_PARSER.parse_hgvs_variant(candidate)
+    except Exception:  # pragma: no cover - depends on third-party parser
+        return None
+
+    transcript = getattr(parsed, "ac", None)
+    posedit = getattr(parsed, "posedit", None)
+    if posedit is None:
+        return None
+
+    variant_text = str(posedit)
+    if not variant_text:
+        return None
+
+    return transcript or None, variant_text
 
 
 def _parse_bool_env_flag(value: Optional[str]) -> Optional[bool]:
@@ -642,15 +661,47 @@ def parse_report_text(
     elif variant_candidates:
         selected_variant = variant_candidates[0]
 
-    normalization_failed = False
-    if selected_variant:
-        normalized = _normalize_hgvs_variant(selected_variant)
-        if normalized:
-            selected_variant = normalized
-        else:
-            normalization_failed = True
-
     result.variant = selected_variant
+
+    normalization_attempted = False
+    normalization_succeeded = False
+
+    def _normalize_from_value(raw_value: Optional[str]) -> Optional[Tuple[Optional[str], str]]:
+        nonlocal normalization_attempted
+
+        if not raw_value:
+            return None
+
+        tokens = _extract_variant_tokens(raw_value)
+        if not tokens:
+            stripped = raw_value.strip()
+            if not stripped:
+                return None
+            tokens = [stripped]
+
+        if _HGVS_PARSER is None:
+            normalization_attempted = True
+            return None
+
+        normalization_attempted = True
+        for token in tokens:
+            normalized_value = _normalize_variant(token)
+            if normalized_value:
+                return normalized_value
+        return None
+
+    normalized_result = _normalize_from_value(variant)
+    if normalized_result is None and table_variant and table_variant != variant:
+        normalized_result = _normalize_from_value(table_variant)
+    if normalized_result is None and selected_variant:
+        normalized_result = _normalize_from_value(selected_variant)
+
+    if normalized_result:
+        normalization_succeeded = True
+        normalized_transcript, normalized_variant = normalized_result
+        if normalized_transcript:
+            result.transcript = normalized_transcript
+        result.variant = normalized_variant
 
     env_setting = _parse_bool_env_flag(os.getenv(_VALIDATION_ENV_VAR))
     if enable_variant_validation is None:
@@ -659,7 +710,7 @@ def parse_report_text(
     should_validate = (
         bool(enable_variant_validation)
         and variant_candidates
-        and (len(variant_candidates) > 1 or normalization_failed)
+        and (len(variant_candidates) > 1 or (normalization_attempted and not normalization_succeeded))
     )
 
     if should_validate:
@@ -671,11 +722,25 @@ def parse_report_text(
                 validation_messages.extend(str(msg) for msg in messages)
             if validation.get("valid"):
                 normalized_candidate = validation.get("normalized")
+                candidate_value = candidate
                 if isinstance(normalized_candidate, str) and normalized_candidate:
-                    result.variant = normalized_candidate
+                    candidate_value = normalized_candidate
+
+                parsed_candidate: Optional[Tuple[Optional[str], str]] = None
+                if _HGVS_PARSER is not None:
+                    normalization_attempted = True
+                    parsed_candidate = _normalize_variant(candidate_value)
+                    if not parsed_candidate and candidate_value != candidate:
+                        parsed_candidate = _normalize_variant(candidate)
+
+                if parsed_candidate:
+                    normalization_succeeded = True
+                    normalized_transcript, normalized_variant = parsed_candidate
+                    if normalized_transcript:
+                        result.transcript = normalized_transcript
+                    result.variant = normalized_variant
                 else:
-                    result.variant = _normalize_hgvs_variant(candidate) or candidate
-                normalization_failed = False
+                    result.variant = candidate_value
                 break
         else:
             if validation_messages:
@@ -688,6 +753,13 @@ def parse_report_text(
                 _logger.warning(
                     "Unable to validate variant candidates %s", variant_candidates
                 )
+
+    if normalization_succeeded:
+        result.variant_normalization_succeeded = True
+    elif normalization_attempted or selected_variant:
+        result.variant_normalization_succeeded = False
+    else:
+        result.variant_normalization_succeeded = None
     if result.zygosity is None and table_like_fields["zygosity"]:
         result.zygosity = table_like_fields["zygosity"]
     if result.interpretation is None and table_like_fields["interpretation"]:
@@ -730,8 +802,8 @@ def extract_from_image(
 ) -> ExtractionResult:
     """Extract key fields from a genetics report screenshot."""
 
-    text = perform_ocr(image_path)
-    return parse_report_text(text, enable_variant_validation=enable_variant_validation)
+    ocr_result = perform_ocr(image_path)
+    return parse_report_text(ocr_result.text, enable_variant_validation=enable_variant_validation)
 
 
 def main() -> None:

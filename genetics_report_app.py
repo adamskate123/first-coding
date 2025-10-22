@@ -20,7 +20,13 @@ def _format_result(result: ExtractionResult) -> str:
     lines = []
     for field, value in result.to_dict().items():
         label = field.replace("_", " ").title()
-        lines.append(f"{label}: {value or 'Not found'}")
+        if isinstance(value, bool):
+            display_value = "Yes" if value else "No"
+        elif value is None:
+            display_value = "Not found"
+        else:
+            display_value = str(value)
+        lines.append(f"{label}: {display_value}")
     return "\n".join(lines)
 
 

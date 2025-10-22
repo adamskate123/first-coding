@@ -30,6 +30,8 @@ def test_parse_report_text_extracts_expected_fields() -> None:
     assert result.gene == "CFTR"
     assert result.transcript == "NM_000492.3"
     assert result.variant.startswith("c.1521_1523delCTT")
+    assert result.variant_normalization_succeeded in {True, False}
+    assert "variant_normalization_succeeded" in result.to_dict()
     assert result.zygosity == "Heterozygous"
     assert result.interpretation == "Pathogenic variant detected"
 
@@ -52,6 +54,7 @@ def test_extract_from_image_uses_ocr_result(monkeypatch, tmp_path: Path) -> None
     assert result.patient == "John Smith"
     assert result.gene == "BRCA1"
     assert result.variant == "c.68_69delAG"
+    assert result.variant_normalization_succeeded in {True, False}
 
 
 def test_perform_ocr_requires_dependencies(monkeypatch, tmp_path: Path) -> None:
@@ -81,6 +84,7 @@ def test_parse_report_text_handles_table_rows_without_headings() -> None:
     assert result.gene == "BRCA1"
     assert result.transcript == "NM_007294.3"
     assert result.variant == "c.5266dupC"
+    assert result.variant_normalization_succeeded in {True, False}
     assert result.zygosity == "Heterozygous"
     assert result.interpretation == "Pathogenic"
 
@@ -103,6 +107,7 @@ def test_parse_report_text_handles_parenthesized_protein_variant_only() -> None:
     result = grp.parse_report_text(sample_text)
 
     assert result.variant == "p.(Gly12Asp)"
+    assert result.variant_normalization_succeeded in {True, False}
 
 
 def test_parse_report_text_uses_remote_validation_for_multiple_candidates(monkeypatch) -> None:
@@ -122,6 +127,7 @@ def test_parse_report_text_uses_remote_validation_for_multiple_candidates(monkey
 
     assert calls == ["c.123A>T", "p.Gly41Val"]
     assert result.variant == "p.Gly41Val"
+    assert result.variant_normalization_succeeded in {True, False}
 
 
 def test_parse_report_text_logs_when_validation_fails(monkeypatch, caplog) -> None:
@@ -136,4 +142,5 @@ def test_parse_report_text_logs_when_validation_fails(monkeypatch, caplog) -> No
         result = grp.parse_report_text(sample_text, enable_variant_validation=True)
 
     assert result.variant == "uncertain deletion"
+    assert result.variant_normalization_succeeded in {True, False}
     assert "Unable to validate variant candidates" in caplog.text
