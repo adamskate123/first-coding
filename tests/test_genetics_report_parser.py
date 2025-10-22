@@ -227,6 +227,22 @@ def test_fallback_gene_detection_skips_generic_tokens() -> None:
     assert result.variant == "c.68_69delAG"
 
 
+def test_fallback_gene_detects_value_on_preceding_line() -> None:
+    sample_text = (
+        "Gene\n"
+        "BRCA1\n"
+        "Variant\n"
+        "c.68_69delAG\n"
+        "Zygosity\n"
+        "Heterozygous\n"
+    )
+
+    fallback = grp._extract_table_like_fields(sample_text)
+
+    assert fallback["gene"] == "BRCA1"
+    assert fallback["variant"] == "c.68_69delAG"
+
+
 def test_parse_report_text_handles_parenthesized_protein_variant_only() -> None:
     sample_text = "p.(Gly12Asp)\n"
 
