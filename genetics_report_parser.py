@@ -29,7 +29,7 @@ import urllib.request
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 try:  # pragma: no cover - import availability depends on environment
     from PIL import Image  # type: ignore
@@ -786,16 +786,53 @@ def perform_ocr(image_path: Path, *, include_layout: bool = False) -> OCRResult:
             else:
                 layout_words = []
                 entries = len(output_dict.get("text", []))
-                page_numbers = output_dict.get("page_num", [1] * entries)
-                block_numbers = output_dict.get("block_num", [0] * entries)
-                paragraph_numbers = output_dict.get("par_num", [0] * entries)
-                line_numbers = output_dict.get("line_num", [0] * entries)
-                word_numbers = output_dict.get("word_num", [0] * entries)
+
+                def _int_from(values: Sequence[Any], index: int, default: int = 0) -> int:
+                    try:
+                        return int(values[index])
+                    except (IndexError, TypeError, ValueError):
+                        return default
+
+                def _float_from(values: Sequence[Any], index: int, default: float = 0.0) -> float:
+                    try:
+                        return float(values[index])
+                    except (IndexError, TypeError, ValueError):
+                        return default
+
+                texts = output_dict.get("text", [])
+                lefts = output_dict.get("left", [])
+                tops = output_dict.get("top", [])
+                widths = output_dict.get("width", [])
+                heights = output_dict.get("height", [])
+                confs = output_dict.get("conf", [])
+                page_numbers = output_dict.get("page_num", [])
+                block_numbers = output_dict.get("block_num", [])
+                paragraph_numbers = output_dict.get("par_num", [])
+                line_numbers = output_dict.get("line_num", [])
+                word_numbers = output_dict.get("word_num", [])
 
                 for idx in range(entries):
-                    raw_text = output_dict["text"][idx]
+                    raw_text = texts[idx]
                     if not raw_text or not raw_text.strip():
                         continue
+
+                    layout_words.append(
+                        OCRWord(
+                            text=str(raw_text).strip(),
+                            left=_int_from(lefts, idx),
+                            top=_int_from(tops, idx),
+                            width=_int_from(widths, idx),
+                            height=_int_from(heights, idx),
+                            conf=_float_from(confs, idx),
+                            page_num=_int_from(page_numbers, idx, default=1),
+                            block_num=_int_from(block_numbers, idx),
+                            par_num=_int_from(paragraph_numbers, idx),
+                            line_num=_int_from(line_numbers, idx),
+                            word_num=_int_from(word_numbers, idx),
+                        )
+                    )
+
+    return OCRResult(text=text, layout=layout_words)
 
 def extract_from_image(
     image_path: Path, *, enable_variant_validation: Optional[bool] = None
