@@ -97,6 +97,39 @@ class ExtractionResult:
         }
 
 
+@dataclass
+class OCRWord:
+    """Lightweight representation of a recognised OCR word and its bounds."""
+
+    text: str
+    left: int
+    top: int
+    width: int
+    height: int
+    conf: float
+    page_num: int
+    block_num: int
+    par_num: int
+    line_num: int
+    word_num: int
+
+    @property
+    def right(self) -> int:
+        return self.left + self.width
+
+    @property
+    def bottom(self) -> int:
+        return self.top + self.height
+
+
+@dataclass
+class OCRResult:
+    """Container for OCR output that includes optional layout metadata."""
+
+    text: str
+    layout: Optional[List[OCRWord]] = None
+
+
 PatternType = Union[str, Tuple[str, str]]
 
 
@@ -186,7 +219,56 @@ def _load_gene_symbols() -> Set[str]:
     return symbols
 
 
+def _load_vocabulary_file(filename: str, *, lowercase: bool = False) -> Set[str]:
+    """Load a simple newline-delimited vocabulary from the data directory."""
+
+    data_path = Path(__file__).resolve().parent / "data" / filename
+    try:
+        lines = data_path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:  # pragma: no cover - defensive fallback
+        return set()
+
+    cleaned: Set[str] = set()
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if lowercase:
+            stripped = stripped.lower()
+        cleaned.add(stripped)
+    return cleaned
+
+
 _GENE_SYMBOLS = _load_gene_symbols()
+_AMINO_ACID_CODES = _load_vocabulary_file("amino_acids.txt")
+_PROHIBITED_VARIANT_SUBSTRINGS = _load_vocabulary_file(
+    "prohibited_variant_tokens.txt", lowercase=True
+)
+
+
+def _is_valid_variant_candidate(candidate: str) -> bool:
+    """Validate heuristic variant candidates against curated vocabularies."""
+
+    if not candidate:
+        return False
+
+    normalized = candidate.strip()
+    lowered = normalized.lower()
+
+    for forbidden in _PROHIBITED_VARIANT_SUBSTRINGS:
+        if forbidden in lowered:
+            return False
+
+    if normalized.startswith(("c.", "C.")):
+        return True
+
+    if normalized.startswith(("p.", "P.")):
+        amino_acid_tokens = re.findall(r"([A-Z][a-z]{2})", normalized)
+        if not amino_acid_tokens:
+            return False
+        return all(token in _AMINO_ACID_CODES for token in amino_acid_tokens)
+
+    return False
 
 
 def _is_plausible_gene_symbol(candidate: str) -> bool:
@@ -242,7 +324,10 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
         if not variant_match:
             continue
 
-        fallback_variant = variant_match.group(1)
+        candidate_variant = variant_match.group(1)
+        fallback_variant = (
+            candidate_variant if _is_valid_variant_candidate(candidate_variant) else None
+        )
         fallback_gene: Optional[str] = None
         fallback_transcript: Optional[str] = None
         fallback_zygosity: Optional[str] = None
@@ -611,14 +696,34 @@ def parse_report_text(
     return result
 
 
-def perform_ocr(image_path: Path) -> str:
-    """Run OCR on the supplied image path and return the recognised text."""
+def perform_ocr(image_path: Path, *, include_layout: bool = False) -> OCRResult:
+    """Run OCR on *image_path* and optionally capture layout metadata."""
 
     _ensure_ocr_dependencies()
 
-    with Image.open(image_path) as image:
-        return pytesseract.image_to_string(image)
+    layout_words: Optional[List[OCRWord]] = None
 
+    with Image.open(image_path) as image:
+        text = pytesseract.image_to_string(image)
+
+        if include_layout:
+            try:
+                output_dict = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+            except AttributeError:  # pragma: no cover - safety net for unexpected pytesseract builds
+                layout_words = None
+            else:
+                layout_words = []
+                entries = len(output_dict.get("text", []))
+                page_numbers = output_dict.get("page_num", [1] * entries)
+                block_numbers = output_dict.get("block_num", [0] * entries)
+                paragraph_numbers = output_dict.get("par_num", [0] * entries)
+                line_numbers = output_dict.get("line_num", [0] * entries)
+                word_numbers = output_dict.get("word_num", [0] * entries)
+
+                for idx in range(entries):
+                    raw_text = output_dict["text"][idx]
+                    if not raw_text or not raw_text.strip():
+                        continue
 
 def extract_from_image(
     image_path: Path, *, enable_variant_validation: Optional[bool] = None

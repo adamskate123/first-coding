@@ -38,11 +38,14 @@ def test_extract_from_image_uses_ocr_result(monkeypatch, tmp_path: Path) -> None
     image_path = tmp_path / "report.png"
     image_path.write_bytes(b"")
 
-    monkeypatch.setattr(
-        grp,
-        "perform_ocr",
-        lambda path: "Patient Name: John Smith\nGene: BRCA1\nVariant: c.68_69delAG",
-    )
+    def fake_perform_ocr(path: Path, include_layout: bool = False) -> grp.OCRResult:
+        assert include_layout is False
+        return grp.OCRResult(
+            text="Patient Name: John Smith\nGene: BRCA1\nVariant: c.68_69delAG",
+            layout=None,
+        )
+
+    monkeypatch.setattr(grp, "perform_ocr", fake_perform_ocr)
 
     result = grp.extract_from_image(image_path)
 
