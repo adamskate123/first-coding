@@ -194,6 +194,31 @@ def _load_vocabulary_file(filename: str, *, lowercase: bool = False) -> Set[str]
 
 _GENE_SYMBOLS = _load_gene_symbols()
 _AMINO_ACID_CODES = _load_vocabulary_file("amino_acids.txt")
+_SINGLE_LETTER_AMINO_ACID_CODES: Set[str] = {
+    "A",
+    "R",
+    "N",
+    "D",
+    "C",
+    "Q",
+    "E",
+    "G",
+    "H",
+    "I",
+    "L",
+    "K",
+    "M",
+    "F",
+    "P",
+    "S",
+    "T",
+    "W",
+    "Y",
+    "V",
+    "U",  # Selenocysteine
+    "O",  # Pyrrolysine
+    "X",  # Unknown or non-standard residue
+}
 _PROHIBITED_VARIANT_SUBSTRINGS = _load_vocabulary_file(
     "prohibited_variant_tokens.txt", lowercase=True
 )
@@ -216,10 +241,18 @@ def _is_valid_variant_candidate(candidate: str) -> bool:
         return True
 
     if normalized.startswith(("p.", "P.")):
-        amino_acid_tokens = re.findall(r"([A-Z][a-z]{2})", normalized)
+        amino_acid_tokens = re.findall(r"([A-Z][a-z]{2}|[A-Z])", normalized)
         if not amino_acid_tokens:
             return False
-        return all(token in _AMINO_ACID_CODES for token in amino_acid_tokens)
+
+        for token in amino_acid_tokens:
+            if len(token) == 1:
+                if token not in _SINGLE_LETTER_AMINO_ACID_CODES:
+                    return False
+            else:
+                if token not in _AMINO_ACID_CODES:
+                    return False
+        return True
 
     return False
 
