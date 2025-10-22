@@ -59,6 +59,14 @@ def _parse_cli_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Output the extracted data as JSON instead of human readable text.",
     )
+    parser.add_argument(
+        "--validate-variants",
+        action="store_true",
+        help=(
+            "Consult Mutalyzer to confirm ambiguous variant candidates. "
+            "Requires internet access and is disabled by default."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -78,7 +86,10 @@ def _run_cli(argv: list[str]) -> int:
         return 1
 
     try:
-        result = extract_from_image(image_path)
+        enable_validation = True if args.validate_variants else None
+        result = extract_from_image(
+            image_path, enable_variant_validation=enable_validation
+        )
     except SystemExit as exc:
         print(str(exc), file=sys.stderr)
         return int(exc.code) if isinstance(exc.code, int) else 1

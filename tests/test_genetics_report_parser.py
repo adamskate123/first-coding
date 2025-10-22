@@ -105,58 +105,35 @@ def test_parse_report_text_handles_parenthesized_protein_variant_only() -> None:
     assert result.variant == "p.(Gly12Asp)"
 
 
-def test_extract_from_image_uses_layout_when_requested(monkeypatch, tmp_path: Path) -> None:
-    image_path = tmp_path / "report.png"
-    image_path.write_bytes(b"")
+def test_parse_report_text_uses_remote_validation_for_multiple_candidates(monkeypatch) -> None:
+    sample_text = "Variant: c.123A>T p.Gly41Val\n"
 
-    layout = [
-        grp.OCRWord(
-            text="Variant",
-            left=10,
-            top=10,
-            width=50,
-            height=15,
-            conf=95.0,
-            page_num=1,
-            block_num=1,
-            par_num=1,
-            line_num=1,
-            word_num=1,
-        ),
-        grp.OCRWord(
-            text=":",
-            left=65,
-            top=10,
-            width=5,
-            height=15,
-            conf=92.0,
-            page_num=1,
-            block_num=1,
-            par_num=1,
-            line_num=1,
-            word_num=2,
-        ),
-        grp.OCRWord(
-            text="c.123A>T",
-            left=75,
-            top=10,
-            width=80,
-            height=15,
-            conf=90.0,
-            page_num=1,
-            block_num=1,
-            par_num=1,
-            line_num=1,
-            word_num=3,
-        ),
-    ]
+    calls = []
 
-    def fake_perform_ocr(path: Path, include_layout: bool = False) -> grp.OCRResult:
-        assert include_layout is True
-        return grp.OCRResult(text="Variant: value not captured", layout=layout)
+    def _fake_validate(variant: str, transcript=None, timeout=10.0):
+        calls.append(variant)
+        if variant.startswith("p."):
+            return {"valid": True, "normalized": "p.Gly41Val", "messages": [], "response": {}}
+        return {"valid": False, "normalized": None, "messages": ["invalid"], "response": {}}
 
-    monkeypatch.setattr(grp, "perform_ocr", fake_perform_ocr)
+    monkeypatch.setattr(grp, "_validate_variant_with_mutalyzer", _fake_validate)
 
-    result = grp.extract_from_image(image_path, use_layout=True)
+    result = grp.parse_report_text(sample_text, enable_variant_validation=True)
 
-    assert result.variant == "c.123A>T"
+    assert calls == ["c.123A>T", "p.Gly41Val"]
+    assert result.variant == "p.Gly41Val"
+
+
+def test_parse_report_text_logs_when_validation_fails(monkeypatch, caplog) -> None:
+    sample_text = "Variant: uncertain deletion\n"
+
+    def _fake_validate(variant: str, transcript=None, timeout=10.0):
+        return {"valid": False, "normalized": None, "messages": ["not recognized"], "response": {}}
+
+    monkeypatch.setattr(grp, "_validate_variant_with_mutalyzer", _fake_validate)
+
+    with caplog.at_level("WARNING"):
+        result = grp.parse_report_text(sample_text, enable_variant_validation=True)
+
+    assert result.variant == "uncertain deletion"
+    assert "Unable to validate variant candidates" in caplog.text

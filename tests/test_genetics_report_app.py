@@ -18,7 +18,7 @@ def test_cli_prints_results(tmp_path, monkeypatch, capsys):
 
     result = ExtractionResult(patient="Ada", gene="BRCA1")
 
-    monkeypatch.setattr(app, "extract_from_image", lambda path: result)
+    monkeypatch.setattr(app, "extract_from_image", lambda path, **kwargs: result)
 
     exit_code = app.main([str(image_path)])
 
@@ -35,7 +35,7 @@ def test_cli_json_output(tmp_path, monkeypatch, capsys):
 
     result = ExtractionResult(patient="Grace", gene="CFTR")
 
-    monkeypatch.setattr(app, "extract_from_image", lambda path: result)
+    monkeypatch.setattr(app, "extract_from_image", lambda path, **kwargs: result)
 
     exit_code = app.main(["--json", str(image_path)])
 
@@ -62,7 +62,7 @@ def test_cli_system_exit(monkeypatch, tmp_path, capsys):
     image_path = tmp_path / "report.png"
     image_path.write_bytes(b"")
 
-    def _raise(_: Path) -> ExtractionResult:
+    def _raise(_: Path, **kwargs) -> ExtractionResult:
         raise SystemExit("Dependency missing")
 
     monkeypatch.setattr(app, "extract_from_image", _raise)
