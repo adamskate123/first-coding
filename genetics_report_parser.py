@@ -359,16 +359,19 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
     )
     zygosity_pattern = re.compile(r"\b(Heterozygous|Homozygous|Hemizygous)\b", re.IGNORECASE)
 
-    interpretation_keywords = {
-        "pathogenic": "Pathogenic",
-        "likely pathogenic": "Likely pathogenic",
-        "variant of uncertain significance": "Variant of Uncertain Significance",
-        "uncertain significance": "Variant of Uncertain Significance",
-        "vus": "Variant of Uncertain Significance",
-        "likely benign": "Likely benign",
-        "benign": "Benign",
-        "risk factor": "Risk factor",
-    }
+    # Evaluate longer interpretation phrases before their substrings so that
+    # specific values such as "likely pathogenic" are not accidentally
+    # downgraded to "pathogenic".
+    interpretation_keywords = [
+        ("variant of uncertain significance", "Variant of Uncertain Significance"),
+        ("likely pathogenic", "Likely pathogenic"),
+        ("pathogenic", "Pathogenic"),
+        ("uncertain significance", "Variant of Uncertain Significance"),
+        ("vus", "Variant of Uncertain Significance"),
+        ("likely benign", "Likely benign"),
+        ("benign", "Benign"),
+        ("risk factor", "Risk factor"),
+    ]
 
     fallback: Dict[str, Optional[str]] = {
         "gene": None,
@@ -414,7 +417,7 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
             fallback_zygosity = zygosity_match.group(1).title()
 
         lowered_line = line.lower()
-        for keyword, canonical in interpretation_keywords.items():
+        for keyword, canonical in interpretation_keywords:
             if keyword in lowered_line:
                 fallback_interpretation = canonical
                 break
@@ -422,7 +425,7 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
         # Interpretation is sometimes wrapped to the following line.
         if fallback_interpretation is None and idx + 1 < len(lines):
             next_line_lower = lines[idx + 1].lower()
-            for keyword, canonical in interpretation_keywords.items():
+            for keyword, canonical in interpretation_keywords:
                 if keyword in next_line_lower:
                     fallback_interpretation = canonical
                     break
