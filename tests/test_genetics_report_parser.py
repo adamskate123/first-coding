@@ -89,6 +89,18 @@ def test_parse_report_text_handles_table_rows_without_headings() -> None:
     assert result.interpretation == "Pathogenic"
 
 
+def test_fallback_preserves_single_letter_protein_variants() -> None:
+    # Some reports list both cDNA and protein descriptions on the same line. When
+    # the protein change uses single-letter HGVS notation we must retain it
+    # during fallback parsing.
+    sample_text = "FGF12 p.G112S c.334 G>A\n"
+
+    fallback = grp._extract_table_like_fields(sample_text)
+
+    assert fallback["gene"] == "FGF12"
+    assert fallback["variant"] == "p.G112S"
+
+
 def test_fallback_gene_detection_skips_generic_tokens() -> None:
     sample_text = (
         "LIKELY PATHOGENIC c.68_69delAG HETEROZYGOUS\n"
