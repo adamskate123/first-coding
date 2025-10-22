@@ -1,8 +1,8 @@
 """Tests for the genetics report parser utilities."""
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 
 import pytest
 
@@ -48,8 +48,16 @@ def test_extract_from_image_uses_ocr_result(monkeypatch, tmp_path: Path) -> None
     image_path = tmp_path / "report.png"
     image_path.write_bytes(b"")
 
-    def fake_perform_ocr(path: Path, include_layout: bool = False) -> grp.OCRResult:
+    def fake_perform_ocr(
+        path: Path,
+        *,
+        include_layout: bool = False,
+        config: str | None = None,
+        lang: str | None = None,
+    ) -> grp.OCRResult:
         assert include_layout is False
+        assert config is None
+        assert lang is None
         return grp.OCRResult(
             text="Patient Name: John Smith\nGene: BRCA1\nVariant: c.68_69delAG",
             layout=None,
@@ -63,6 +71,36 @@ def test_extract_from_image_uses_ocr_result(monkeypatch, tmp_path: Path) -> None
     assert result.gene == "BRCA1"
     assert result.variant == "c.68_69delAG"
     assert result.variant_normalization_succeeded in {True, False}
+
+
+def test_extract_from_image_threads_config_and_lang(monkeypatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "report.png"
+    image_path.write_bytes(b"")
+
+    captured: dict[str, str | None] = {}
+
+    def fake_perform_ocr(
+        path: Path,
+        *,
+        include_layout: bool = False,
+        config: str | None = None,
+        lang: str | None = None,
+    ) -> grp.OCRResult:
+        captured["path"] = str(path)
+        captured["config"] = config
+        captured["lang"] = lang
+        return grp.OCRResult(text="Variant: c.68_69delAG", layout=None)
+
+    monkeypatch.setattr(grp, "perform_ocr", fake_perform_ocr)
+
+    result = grp.extract_from_image(
+        image_path, ocr_config="--psm 6", ocr_lang="eng+spa"
+    )
+
+    assert result.variant == "c.68_69delAG"
+    assert captured["path"] == str(image_path)
+    assert captured["config"] == "--psm 6"
+    assert captured["lang"] == "eng+spa"
 
 
 def test_perform_ocr_requires_dependencies(monkeypatch, tmp_path: Path) -> None:
@@ -80,76 +118,61 @@ def test_perform_ocr_requires_dependencies(monkeypatch, tmp_path: Path) -> None:
         raise AssertionError("Expected SystemExit when OCR dependencies are missing")
 
 
-@pytest.mark.skipif(Image is None, reason="Pillow is required for OCR preprocessing tests")
-def test_perform_ocr_with_preprocessing(monkeypatch, tmp_path: Path) -> None:
+def test_perform_ocr_forwards_config_and_lang(monkeypatch, tmp_path: Path) -> None:
     image_path = tmp_path / "report.png"
-    Image.new("RGB", (20, 20), color="white").save(image_path)
+    image_path.write_bytes(b"")
 
-    class DummyPytesseract:
-        Output = SimpleNamespace(DICT="dict")
+    class DummyImage:
+        def __enter__(self):
+            return self
 
-        def __init__(self) -> None:
-            self.calls = []
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
 
-        def image_to_string(self, img):  # type: ignore[no-untyped-def]
-            self.calls.append(("string", img.mode))
-            return "dummy text"
+    monkeypatch.setattr(grp, "Image", SimpleNamespace(open=lambda path: DummyImage()))
 
-        def image_to_data(self, img, output_type=None):  # type: ignore[no-untyped-def]
-            assert output_type == self.Output.DICT
-            self.calls.append(("data", img.mode))
-            return {
-                "text": ["dummy"],
-                "left": [1],
-                "top": [2],
-                "width": [3],
-                "height": [4],
-                "conf": ["90"],
-                "page_num": ["1"],
-                "block_num": ["1"],
-                "par_num": ["1"],
-                "line_num": ["1"],
-                "word_num": ["1"],
-            }
+    captured: dict[str, dict[str, object]] = {}
 
-    dummy = DummyPytesseract()
-    monkeypatch.setattr(grp, "pytesseract", dummy)
+    def fake_image_to_string(image, **kwargs):
+        captured["string"] = kwargs
+        return "foo"
 
-    result = grp.perform_ocr(image_path, include_layout=True, preprocess=True)
+    def fake_image_to_data(image, **kwargs):
+        captured["data"] = kwargs
+        return {
+            "text": ["foo"],
+            "left": [1],
+            "top": [2],
+            "width": [3],
+            "height": [4],
+            "conf": [95],
+            "page_num": [1],
+            "block_num": [1],
+            "par_num": [1],
+            "line_num": [1],
+            "word_num": [1],
+        }
 
-    assert result.text == "dummy text"
+    pytesseract_stub = SimpleNamespace(
+        Output=SimpleNamespace(DICT="DICT"),
+        image_to_string=fake_image_to_string,
+        image_to_data=fake_image_to_data,
+    )
+
+    monkeypatch.setattr(grp, "pytesseract", pytesseract_stub)
+
+    result = grp.perform_ocr(
+        image_path, include_layout=True, config="--psm 6", lang="eng+spa"
+    )
+
+    assert captured["string"] == {"config": "--psm 6", "lang": "eng+spa"}
+    assert captured["data"]["output_type"] == pytesseract_stub.Output.DICT
+    assert captured["data"]["config"] == "--psm 6"
+    assert captured["data"]["lang"] == "eng+spa"
+    assert result.text == "foo"
     assert result.layout is not None
-    assert result.layout[0].text == "dummy"
-    assert dummy.calls[0][1] == "L"  # grayscale conversion triggers mode change
-    assert dummy.calls[1][1] == "L"
-
-
-@pytest.mark.skipif(Image is None, reason="Pillow is required for OCR preprocessing tests")
-def test_perform_ocr_without_preprocessing(monkeypatch, tmp_path: Path) -> None:
-    image_path = tmp_path / "report.png"
-    Image.new("RGB", (20, 20), color="white").save(image_path)
-
-    class DummyPytesseract:
-        Output = SimpleNamespace(DICT="dict")
-
-        def __init__(self) -> None:
-            self.calls = []
-
-        def image_to_string(self, img):  # type: ignore[no-untyped-def]
-            self.calls.append(("string", img.mode))
-            return "dummy text"
-
-        def image_to_data(self, img, output_type=None):  # type: ignore[no-untyped-def]
-            raise AssertionError("Layout capture should not be invoked without include_layout")
-
-    dummy = DummyPytesseract()
-    monkeypatch.setattr(grp, "pytesseract", dummy)
-
-    result = grp.perform_ocr(image_path, preprocess=False)
-
-    assert result.text == "dummy text"
-    assert result.layout is None
-    assert dummy.calls == [("string", "RGB")]
+    assert len(result.layout) == 1
+    assert result.layout[0].text == "foo"
 
 
 def test_parse_report_text_handles_table_rows_without_headings() -> None:
@@ -298,8 +321,16 @@ def test_cli_expands_user_path(monkeypatch, tmp_path, capsys) -> None:
 
     expected_result = grp.ExtractionResult(patient="Linus")
 
-    def _fake_extract(path: Path, *, enable_variant_validation=None):
+    def _fake_extract(
+        path: Path,
+        *,
+        enable_variant_validation=None,
+        ocr_config: str | None = None,
+        ocr_lang: str | None = None,
+    ):
         assert path == image_path
+        assert ocr_config is None
+        assert ocr_lang is None
         return expected_result
 
     monkeypatch.setattr(grp, "extract_from_image", _fake_extract)
