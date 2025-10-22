@@ -26,6 +26,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -529,6 +530,36 @@ def _parse_bool_env_flag(value: Optional[str]) -> Optional[bool]:
     return None
 
 
+def _prepare_variant_for_mutalyzer(
+    candidate: str, transcript: Optional[str]
+) -> Optional[Tuple[str, Optional[str]]]:
+    """Return a cleaned variant/transcript pair suitable for Mutalyzer."""
+
+    if not candidate:
+        return None
+
+    normalized_candidate = candidate.strip()
+    if not normalized_candidate:
+        return None
+
+    normalized_candidate = _canonicalize_variant_prefix(normalized_candidate)
+    if not _is_valid_variant_candidate(normalized_candidate):
+        return None
+
+    cleaned_transcript: Optional[str] = None
+    if transcript:
+        cleaned_transcript = re.sub(r"\s+", "", transcript.strip())
+        if not cleaned_transcript:
+            cleaned_transcript = None
+
+    if cleaned_transcript and ":" not in normalized_candidate and not normalized_candidate.startswith(
+        cleaned_transcript
+    ):
+        normalized_candidate = f"{cleaned_transcript}:{normalized_candidate}"
+
+    return normalized_candidate, cleaned_transcript
+
+
 def _validate_variant_with_mutalyzer(
     variant: str, transcript: Optional[str] = None, timeout: float = 10.0
 ) -> Dict[str, Any]:
@@ -541,19 +572,20 @@ def _validate_variant_with_mutalyzer(
 
     global _LAST_MUTALYZER_REQUEST
 
-    payload: Dict[str, str] = {"variant": variant}
+    query_params = {"variant": variant}
     if transcript:
-        payload["transcript"] = transcript
+        query_params["transcript"] = transcript
 
-    data = json.dumps(payload).encode("utf-8")
+    request_url = _MUTALYZER_API_URL
+    if query_params:
+        request_url = f"{_MUTALYZER_API_URL}?{urllib.parse.urlencode(query_params)}"
     wait_time = _MUTALYZER_RATE_LIMIT_SECONDS - (time.time() - _LAST_MUTALYZER_REQUEST)
     if wait_time > 0:
         time.sleep(wait_time)
 
     request = urllib.request.Request(
-        _MUTALYZER_API_URL,
-        data=data,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        request_url,
+        headers={"Accept": "application/json"},
     )
 
     def _error_response(message: str) -> Dict[str, Any]:
@@ -800,14 +832,23 @@ def parse_report_text(
 
     if should_validate:
         validation_messages: List[str] = []
+        skipped_candidates: List[str] = []
         for candidate in variant_candidates:
-            validation = _validate_variant_with_mutalyzer(candidate, transcript=result.transcript)
+            prepared = _prepare_variant_for_mutalyzer(candidate, result.transcript)
+            if prepared is None:
+                skipped_candidates.append(candidate)
+                continue
+
+            prepared_candidate, prepared_transcript = prepared
+            validation = _validate_variant_with_mutalyzer(
+                prepared_candidate, transcript=prepared_transcript
+            )
             messages = validation.get("messages")
             if isinstance(messages, list):
                 validation_messages.extend(str(msg) for msg in messages)
             if validation.get("valid"):
                 normalized_candidate = validation.get("normalized")
-                candidate_value = candidate
+                candidate_value = prepared_candidate
                 if isinstance(normalized_candidate, str) and normalized_candidate:
                     candidate_value = normalized_candidate
 
@@ -829,15 +870,32 @@ def parse_report_text(
                 break
         else:
             if validation_messages:
+                detail_message = "; ".join(validation_messages)
+                if skipped_candidates:
+                    detail_message = (
+                        f"{detail_message} | Skipped non-HGVS candidates: {skipped_candidates}"
+                    )
                 _logger.warning(
                     "Unable to validate variant candidates %s: %s",
                     variant_candidates,
-                    "; ".join(validation_messages),
+                    detail_message,
                 )
             else:
-                _logger.warning(
-                    "Unable to validate variant candidates %s", variant_candidates
-                )
+                details = []
+                if skipped_candidates:
+                    details.append(
+                        f"Skipped non-HGVS candidates: {skipped_candidates}"
+                    )
+                if details:
+                    _logger.warning(
+                        "Unable to validate variant candidates %s: %s",
+                        variant_candidates,
+                        " | ".join(details),
+                    )
+                else:
+                    _logger.warning(
+                        "Unable to validate variant candidates %s", variant_candidates
+                    )
 
     if normalization_succeeded:
         result.variant_normalization_succeeded = True
