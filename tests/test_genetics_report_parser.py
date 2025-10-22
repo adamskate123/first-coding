@@ -131,6 +131,15 @@ def test_parse_report_text_preserves_variant_with_internal_spaces() -> None:
     assert result.variant_normalization_succeeded in {True, False}
 
 
+def test_parse_report_text_handles_uppercase_variant_prefixes() -> None:
+    sample_text = "Variant: C.1521_1523delCTT (P.Phe508del)\n"
+
+    result = grp.parse_report_text(sample_text)
+
+    assert result.variant == "c.1521_1523delCTT"
+    assert result.variant_normalization_succeeded in {True, False, None}
+
+
 def test_parse_report_text_uses_remote_validation_for_multiple_candidates(monkeypatch) -> None:
     sample_text = "Variant: c.123A>T p.Gly41Val\n"
 
