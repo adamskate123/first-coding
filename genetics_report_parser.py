@@ -33,9 +33,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 try:  # pragma: no cover - import availability depends on environment
-    from PIL import Image  # type: ignore
+    from PIL import Image, ImageFilter, ImageOps  # type: ignore
 except ImportError:  # pragma: no cover - handled lazily in _ensure_ocr_dependencies
     Image = None  # type: ignore[assignment]
+    ImageFilter = None  # type: ignore[assignment]
+    ImageOps = None  # type: ignore[assignment]
 
 try:  # pragma: no cover - import availability depends on environment
     import pytesseract  # type: ignore
@@ -911,7 +913,30 @@ def parse_report_text(
     return result
 
 
-def perform_ocr(image_path: Path, *, include_layout: bool = False) -> OCRResult:
+def _preprocess_image_for_ocr(image: Image.Image) -> Image.Image:
+    """Apply light preprocessing to improve OCR results."""
+
+    if ImageOps is None:  # pragma: no cover - defensive guard when Pillow is missing
+        return image
+
+    grayscale = ImageOps.grayscale(image)
+    enhanced = ImageOps.autocontrast(grayscale)
+
+    if ImageFilter is not None:
+        try:
+            enhanced = enhanced.filter(ImageFilter.MedianFilter(size=3))
+        except ValueError:  # pragma: no cover - filter size validation safety net
+            enhanced = enhanced.filter(ImageFilter.MedianFilter())
+
+    return enhanced
+
+
+def perform_ocr(
+    image_path: Path,
+    *,
+    include_layout: bool = False,
+    preprocess: bool = False,
+) -> OCRResult:
     """Run OCR on *image_path* and optionally capture layout metadata."""
 
     _ensure_ocr_dependencies()
@@ -919,11 +944,15 @@ def perform_ocr(image_path: Path, *, include_layout: bool = False) -> OCRResult:
     layout_words: Optional[List[OCRWord]] = None
 
     with Image.open(image_path) as image:
-        text = pytesseract.image_to_string(image)
+        ocr_image = _preprocess_image_for_ocr(image) if preprocess else image
+
+        text = pytesseract.image_to_string(ocr_image)
 
         if include_layout:
             try:
-                output_dict = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+                output_dict = pytesseract.image_to_data(
+                    ocr_image, output_type=pytesseract.Output.DICT
+                )
             except AttributeError:  # pragma: no cover - safety net for unexpected pytesseract builds
                 layout_words = None
             else:

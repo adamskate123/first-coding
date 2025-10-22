@@ -1,7 +1,15 @@
 """Tests for the genetics report parser utilities."""
 
 from pathlib import Path
+from types import SimpleNamespace
 import sys
+
+import pytest
+
+try:  # pragma: no cover - Pillow is optional for the test environment
+    from PIL import Image
+except ImportError:  # pragma: no cover - handled via test skips when Pillow is absent
+    Image = None  # type: ignore[assignment]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -70,6 +78,78 @@ def test_perform_ocr_requires_dependencies(monkeypatch, tmp_path: Path) -> None:
         assert "Missing dependencies" in str(exc)
     else:  # pragma: no cover - ensure the SystemExit is raised
         raise AssertionError("Expected SystemExit when OCR dependencies are missing")
+
+
+@pytest.mark.skipif(Image is None, reason="Pillow is required for OCR preprocessing tests")
+def test_perform_ocr_with_preprocessing(monkeypatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "report.png"
+    Image.new("RGB", (20, 20), color="white").save(image_path)
+
+    class DummyPytesseract:
+        Output = SimpleNamespace(DICT="dict")
+
+        def __init__(self) -> None:
+            self.calls = []
+
+        def image_to_string(self, img):  # type: ignore[no-untyped-def]
+            self.calls.append(("string", img.mode))
+            return "dummy text"
+
+        def image_to_data(self, img, output_type=None):  # type: ignore[no-untyped-def]
+            assert output_type == self.Output.DICT
+            self.calls.append(("data", img.mode))
+            return {
+                "text": ["dummy"],
+                "left": [1],
+                "top": [2],
+                "width": [3],
+                "height": [4],
+                "conf": ["90"],
+                "page_num": ["1"],
+                "block_num": ["1"],
+                "par_num": ["1"],
+                "line_num": ["1"],
+                "word_num": ["1"],
+            }
+
+    dummy = DummyPytesseract()
+    monkeypatch.setattr(grp, "pytesseract", dummy)
+
+    result = grp.perform_ocr(image_path, include_layout=True, preprocess=True)
+
+    assert result.text == "dummy text"
+    assert result.layout is not None
+    assert result.layout[0].text == "dummy"
+    assert dummy.calls[0][1] == "L"  # grayscale conversion triggers mode change
+    assert dummy.calls[1][1] == "L"
+
+
+@pytest.mark.skipif(Image is None, reason="Pillow is required for OCR preprocessing tests")
+def test_perform_ocr_without_preprocessing(monkeypatch, tmp_path: Path) -> None:
+    image_path = tmp_path / "report.png"
+    Image.new("RGB", (20, 20), color="white").save(image_path)
+
+    class DummyPytesseract:
+        Output = SimpleNamespace(DICT="dict")
+
+        def __init__(self) -> None:
+            self.calls = []
+
+        def image_to_string(self, img):  # type: ignore[no-untyped-def]
+            self.calls.append(("string", img.mode))
+            return "dummy text"
+
+        def image_to_data(self, img, output_type=None):  # type: ignore[no-untyped-def]
+            raise AssertionError("Layout capture should not be invoked without include_layout")
+
+    dummy = DummyPytesseract()
+    monkeypatch.setattr(grp, "pytesseract", dummy)
+
+    result = grp.perform_ocr(image_path, preprocess=False)
+
+    assert result.text == "dummy text"
+    assert result.layout is None
+    assert dummy.calls == [("string", "RGB")]
 
 
 def test_parse_report_text_handles_table_rows_without_headings() -> None:
