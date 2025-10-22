@@ -20,11 +20,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import re
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 try:  # pragma: no cover - import availability depends on environment
     from PIL import Image  # type: ignore
@@ -40,6 +45,15 @@ try:  # pragma: no cover - optional dependency for fuzzy label matching
     from rapidfuzz import process as rapidfuzz_process
 except ImportError:  # pragma: no cover - fuzzy matching remains optional
     rapidfuzz_process = None  # type: ignore[assignment]
+
+
+_logger = logging.getLogger(__name__)
+
+
+_MUTALYZER_RATE_LIMIT_SECONDS = 1.0
+_LAST_MUTALYZER_REQUEST: float = 0.0
+_MUTALYZER_API_URL = "https://mutalyzer.nl/api/v2/normalize"
+_VALIDATION_ENV_VAR = "GENETICS_REPORT_VALIDATE_VARIANTS"
 
 
 def _ensure_ocr_dependencies() -> None:
@@ -283,7 +297,144 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
     return fallback
 
 
-def parse_report_text(text: str) -> ExtractionResult:
+def _extract_variant_tokens(value: str) -> List[str]:
+    """Return individual HGVS-like tokens from a combined variant string."""
+
+    variant_pattern = re.compile(
+        r"(c\.[A-Za-z0-9_>+\-/]+|p\.(?:\([A-Za-z0-9_>+\-/]+\)|[A-Za-z0-9_>+\-/]+))",
+    )
+    tokens = [match.group(1) for match in variant_pattern.finditer(value)]
+    if not tokens and value.strip():
+        tokens.append(value.strip())
+    return tokens
+
+
+def _normalize_hgvs_variant(value: str) -> Optional[str]:
+    """Return a lightly normalised HGVS string or ``None`` when it looks invalid."""
+
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+
+    cleaned = re.sub(r"\s+", "", cleaned)
+
+    if re.match(r"^(?:[cgnmpr]\.)", cleaned, re.IGNORECASE):
+        # Upper-case the prefix for consistency (e.g. c. -> c.) but keep body intact.
+        prefix, rest = cleaned[:2], cleaned[2:]
+        return prefix.lower() + rest
+    if re.match(r"^p\.\(", cleaned):
+        return cleaned
+    return None
+
+
+def _parse_bool_env_flag(value: Optional[str]) -> Optional[bool]:
+    """Convert a string environment variable to a boolean flag."""
+
+    if value is None:
+        return None
+    lowered = value.strip().lower()
+    if lowered in {"1", "true", "yes", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _validate_variant_with_mutalyzer(
+    variant: str, transcript: Optional[str] = None, timeout: float = 10.0
+) -> Dict[str, Any]:
+    """Validate a candidate variant using the Mutalyzer API.
+
+    The function respects a minimal interval between requests to avoid exceeding
+    rate limits. Network or API failures are returned as structured responses
+    rather than raising exceptions so callers can decide how to proceed.
+    """
+
+    global _LAST_MUTALYZER_REQUEST
+
+    payload: Dict[str, str] = {"variant": variant}
+    if transcript:
+        payload["transcript"] = transcript
+
+    data = json.dumps(payload).encode("utf-8")
+    wait_time = _MUTALYZER_RATE_LIMIT_SECONDS - (time.time() - _LAST_MUTALYZER_REQUEST)
+    if wait_time > 0:
+        time.sleep(wait_time)
+
+    request = urllib.request.Request(
+        _MUTALYZER_API_URL,
+        data=data,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+
+    def _error_response(message: str) -> Dict[str, Any]:
+        return {"valid": False, "normalized": None, "messages": [message], "response": {}}
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            _LAST_MUTALYZER_REQUEST = time.time()
+            content = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        _LAST_MUTALYZER_REQUEST = time.time()
+        try:
+            detail = exc.read().decode("utf-8")
+        except Exception:  # pragma: no cover - defensive fallback
+            detail = ""
+        message = f"HTTP {exc.code} from Mutalyzer: {detail or exc.reason}"
+        return _error_response(message)
+    except urllib.error.URLError as exc:
+        _LAST_MUTALYZER_REQUEST = time.time()
+        message = f"Network error contacting Mutalyzer: {exc.reason}"
+        return _error_response(message)
+
+    try:
+        response_data = json.loads(content)
+    except json.JSONDecodeError:
+        return _error_response("Mutalyzer returned invalid JSON")
+
+    normalized: Optional[str] = None
+    if isinstance(response_data, dict):
+        candidates: List[str] = []
+        for key in (
+            "normalized_description",
+            "normalized_variant",
+            "normalized",
+            "description",
+        ):
+            value = response_data.get(key)
+            if isinstance(value, str):
+                candidates.append(value)
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str):
+                        candidates.append(item)
+                    elif isinstance(item, dict):
+                        description = item.get("description")
+                        if isinstance(description, str):
+                            candidates.append(description)
+        if candidates:
+            normalized = candidates[0]
+
+    valid = bool(normalized or (isinstance(response_data, dict) and response_data.get("valid")))
+    messages: List[str] = []
+    for key in ("warnings", "errors", "messages"):
+        value = response_data.get(key) if isinstance(response_data, dict) else None
+        if isinstance(value, list):
+            messages.extend(str(item) for item in value)
+        elif isinstance(value, str):
+            messages.append(value)
+
+    return {
+        "valid": valid,
+        "normalized": normalized,
+        "messages": messages,
+        "response": response_data,
+    }
+
+
+def parse_report_text(
+    text: str, *, enable_variant_validation: Optional[bool] = None
+) -> ExtractionResult:
     """Parse OCR text from a clinical genetics report.
 
     The function searches for common field labels and returns the extracted
@@ -368,14 +519,90 @@ def parse_report_text(text: str) -> ExtractionResult:
         result.gene = table_like_fields["gene"]
     if result.transcript is None and table_like_fields["transcript"]:
         result.transcript = table_like_fields["transcript"]
-    if table_like_fields["variant"]:
+
+    variant_candidates: List[str] = []
+
+    def _register_candidates(raw_value: Optional[str]) -> None:
+        if not raw_value:
+            return
+        for token in _extract_variant_tokens(raw_value):
+            if token not in variant_candidates:
+                variant_candidates.append(token)
+
+    _register_candidates(variant)
+
+    table_variant = table_like_fields["variant"]
+    if table_variant:
         if result.variant is None:
-            result.variant = table_like_fields["variant"]
+            result.variant = table_variant
         else:
-            current = result.variant.lower()
-            candidate = table_like_fields["variant"].lower()
-            if candidate.startswith(("c.", "p.")) and not current.startswith(("c.", "p.")):
-                result.variant = table_like_fields["variant"]
+            current_tokens = _extract_variant_tokens(result.variant)
+            candidate_tokens = _extract_variant_tokens(table_variant)
+            if current_tokens and candidate_tokens:
+                current_primary = current_tokens[0].lower()
+                candidate_primary = candidate_tokens[0].lower()
+                if candidate_primary.startswith(("c.", "p.")) and not current_primary.startswith(("c.", "p.")):
+                    result.variant = candidate_tokens[0]
+        _register_candidates(table_variant)
+
+    _register_candidates(result.variant)
+
+    selected_variant: Optional[str] = None
+    if result.variant:
+        selected_tokens = _extract_variant_tokens(result.variant)
+        if selected_tokens:
+            selected_variant = selected_tokens[0]
+        else:
+            selected_variant = result.variant.strip()
+    elif variant_candidates:
+        selected_variant = variant_candidates[0]
+
+    normalization_failed = False
+    if selected_variant:
+        normalized = _normalize_hgvs_variant(selected_variant)
+        if normalized:
+            selected_variant = normalized
+        else:
+            normalization_failed = True
+
+    result.variant = selected_variant
+
+    env_setting = _parse_bool_env_flag(os.getenv(_VALIDATION_ENV_VAR))
+    if enable_variant_validation is None:
+        enable_variant_validation = env_setting if env_setting is not None else False
+
+    should_validate = (
+        bool(enable_variant_validation)
+        and variant_candidates
+        and (len(variant_candidates) > 1 or normalization_failed)
+    )
+
+    if should_validate:
+        validation_messages: List[str] = []
+        for candidate in variant_candidates:
+            validation = _validate_variant_with_mutalyzer(candidate, transcript=result.transcript)
+            messages = validation.get("messages")
+            if isinstance(messages, list):
+                validation_messages.extend(str(msg) for msg in messages)
+            if validation.get("valid"):
+                normalized_candidate = validation.get("normalized")
+                if isinstance(normalized_candidate, str) and normalized_candidate:
+                    result.variant = normalized_candidate
+                else:
+                    result.variant = _normalize_hgvs_variant(candidate) or candidate
+                normalization_failed = False
+                break
+        else:
+            if validation_messages:
+                _logger.warning(
+                    "Unable to validate variant candidates %s: %s",
+                    variant_candidates,
+                    "; ".join(validation_messages),
+                )
+            else:
+                _logger.warning(
+                    "Unable to validate variant candidates %s", variant_candidates
+                )
     if result.zygosity is None and table_like_fields["zygosity"]:
         result.zygosity = table_like_fields["zygosity"]
     if result.interpretation is None and table_like_fields["interpretation"]:
@@ -393,11 +620,13 @@ def perform_ocr(image_path: Path) -> str:
         return pytesseract.image_to_string(image)
 
 
-def extract_from_image(image_path: Path) -> ExtractionResult:
+def extract_from_image(
+    image_path: Path, *, enable_variant_validation: Optional[bool] = None
+) -> ExtractionResult:
     """Extract key fields from a genetics report screenshot."""
 
     text = perform_ocr(image_path)
-    return parse_report_text(text)
+    return parse_report_text(text, enable_variant_validation=enable_variant_validation)
 
 
 def main() -> None:
@@ -414,12 +643,23 @@ def main() -> None:
         action="store_true",
         help="Output the extracted data as JSON instead of human readable text.",
     )
+    parser.add_argument(
+        "--validate-variants",
+        action="store_true",
+        help=(
+            "Consult Mutalyzer to confirm ambiguous variant candidates. "
+            "Requires internet access and is disabled by default."
+        ),
+    )
     args = parser.parse_args()
 
     if not args.image.exists():
         raise SystemExit(f"File not found: {args.image}")
 
-    result = extract_from_image(args.image)
+    enable_validation = True if args.validate_variants else None
+    result = extract_from_image(
+        args.image, enable_variant_validation=enable_validation
+    )
 
     if args.json:
         print(json.dumps(result.to_dict(), indent=2))

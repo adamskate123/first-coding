@@ -100,3 +100,37 @@ def test_parse_report_text_handles_parenthesized_protein_variant_only() -> None:
     result = grp.parse_report_text(sample_text)
 
     assert result.variant == "p.(Gly12Asp)"
+
+
+def test_parse_report_text_uses_remote_validation_for_multiple_candidates(monkeypatch) -> None:
+    sample_text = "Variant: c.123A>T p.Gly41Val\n"
+
+    calls = []
+
+    def _fake_validate(variant: str, transcript=None, timeout=10.0):
+        calls.append(variant)
+        if variant.startswith("p."):
+            return {"valid": True, "normalized": "p.Gly41Val", "messages": [], "response": {}}
+        return {"valid": False, "normalized": None, "messages": ["invalid"], "response": {}}
+
+    monkeypatch.setattr(grp, "_validate_variant_with_mutalyzer", _fake_validate)
+
+    result = grp.parse_report_text(sample_text, enable_variant_validation=True)
+
+    assert calls == ["c.123A>T", "p.Gly41Val"]
+    assert result.variant == "p.Gly41Val"
+
+
+def test_parse_report_text_logs_when_validation_fails(monkeypatch, caplog) -> None:
+    sample_text = "Variant: uncertain deletion\n"
+
+    def _fake_validate(variant: str, transcript=None, timeout=10.0):
+        return {"valid": False, "normalized": None, "messages": ["not recognized"], "response": {}}
+
+    monkeypatch.setattr(grp, "_validate_variant_with_mutalyzer", _fake_validate)
+
+    with caplog.at_level("WARNING"):
+        result = grp.parse_report_text(sample_text, enable_variant_validation=True)
+
+    assert result.variant == "uncertain deletion"
+    assert "Unable to validate variant candidates" in caplog.text

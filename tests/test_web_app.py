@@ -31,7 +31,7 @@ def test_post_index_runs_extraction(monkeypatch, client):
         def to_dict(self) -> Dict[str, Optional[str]]:  # type: ignore[override]
             return {"gene": "BRCA1", "variant": "c.68_69delAG"}
 
-    monkeypatch.setattr(web_app, "extract_from_image", lambda path: DummyResult())
+    monkeypatch.setattr(web_app, "extract_from_image", lambda path, **kwargs: DummyResult())
 
     data = {"report": (io.BytesIO(b"fake image"), "report.png")}
     response = client.post("/", data=data, content_type="multipart/form-data")

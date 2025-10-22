@@ -35,6 +35,12 @@ python genetics_report_parser.py /path/to/report.png
 Append `--json` to emit a machine-readable JSON representation of the extracted
 fields.
 
+Pass `--validate-variants` to confirm ambiguous HGVS candidates with the online
+Mutalyzer service. This flag requires internet access and is disabled by
+default so offline workflows remain unchanged. The same behaviour can be
+enabled non-interactively by setting the `GENETICS_REPORT_VALIDATE_VARIANTS`
+environment variable to `1`.
+
 ### Testing
 
 Execute the automated tests with `pytest`:
