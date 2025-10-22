@@ -73,3 +73,27 @@ def test_cli_system_exit(monkeypatch, tmp_path, capsys):
     captured = capsys.readouterr()
     assert "Dependency missing" in captured.err
     assert captured.out == ""
+
+
+def test_cli_validate_variants_flag(tmp_path, monkeypatch, capsys):
+    image_path = tmp_path / "report.png"
+    image_path.write_bytes(b"")
+
+    result = ExtractionResult(variant="p.Gly41Val")
+    captured_kwargs = {}
+
+    def _fake_extract(path: Path, *, enable_variant_validation=None):
+        captured_kwargs["path"] = path
+        captured_kwargs["enable"] = enable_variant_validation
+        return result
+
+    monkeypatch.setattr(app, "extract_from_image", _fake_extract)
+
+    exit_code = app.main(["--validate-variants", str(image_path)])
+
+    assert exit_code == 0
+    assert captured_kwargs["path"] == image_path
+    assert captured_kwargs["enable"] is True
+    captured = capsys.readouterr()
+    assert "Variant: p.Gly41Val" in captured.out
+    assert captured.err == ""

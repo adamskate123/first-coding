@@ -176,6 +176,27 @@ def test_parse_report_text_logs_when_validation_fails(monkeypatch, caplog) -> No
     assert "Unable to validate variant candidates" in caplog.text
 
 
+def test_parse_report_text_env_flag_enables_validation(monkeypatch) -> None:
+    sample_text = "Variant: c.123A>T p.Gly41Val\n"
+
+    calls = []
+
+    def _fake_validate(variant: str, transcript=None, timeout=10.0):
+        calls.append((variant, transcript))
+        if variant.startswith("p."):
+            return {"valid": True, "normalized": "p.Gly41Val", "messages": [], "response": {}}
+        return {"valid": False, "normalized": None, "messages": ["invalid"], "response": {}}
+
+    monkeypatch.setattr(grp, "_validate_variant_with_mutalyzer", _fake_validate)
+    monkeypatch.setenv("GENETICS_REPORT_VALIDATE_VARIANTS", "1")
+
+    result = grp.parse_report_text(sample_text)
+
+    assert calls == [("c.123A>T", None), ("p.Gly41Val", None)]
+    assert result.variant == "p.Gly41Val"
+    assert result.variant_normalization_succeeded in {True, False}
+
+
 def test_cli_expands_user_path(monkeypatch, tmp_path, capsys) -> None:
     home_dir = tmp_path / "home"
     home_dir.mkdir()
