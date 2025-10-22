@@ -174,3 +174,26 @@ def test_parse_report_text_logs_when_validation_fails(monkeypatch, caplog) -> No
     assert result.variant == "uncertain deletion"
     assert result.variant_normalization_succeeded in {True, False}
     assert "Unable to validate variant candidates" in caplog.text
+
+
+def test_cli_expands_user_path(monkeypatch, tmp_path, capsys) -> None:
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    image_path = home_dir / "report.png"
+    image_path.write_bytes(b"")
+
+    monkeypatch.setenv("HOME", str(home_dir))
+
+    expected_result = grp.ExtractionResult(patient="Linus")
+
+    def _fake_extract(path: Path, *, enable_variant_validation=None):
+        assert path == image_path
+        return expected_result
+
+    monkeypatch.setattr(grp, "extract_from_image", _fake_extract)
+    monkeypatch.setattr(sys, "argv", ["genetics_report_parser.py", "~/report.png"])
+
+    grp.main()
+
+    captured = capsys.readouterr()
+    assert "Patient: Linus" in captured.out
