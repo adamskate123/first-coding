@@ -92,3 +92,11 @@ def test_fallback_gene_detection_skips_generic_tokens() -> None:
 
     assert result.gene == "BRCA1"
     assert result.variant == "c.68_69delAG"
+
+
+def test_parse_report_text_handles_parenthesized_protein_variant_only() -> None:
+    sample_text = "p.(Gly12Asp)\n"
+
+    result = grp.parse_report_text(sample_text)
+
+    assert result.variant == "p.(Gly12Asp)"

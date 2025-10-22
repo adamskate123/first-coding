@@ -198,7 +198,9 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
 
     gene_pattern = re.compile(r"\b([A-Z0-9]{2,})\b")
     transcript_pattern = re.compile(r"\b((?:NM|NC|LRG|ENST)[0-9._]+)\b", re.IGNORECASE)
-    variant_pattern = re.compile(r"(c\.[A-Za-z0-9_>+\-/]+|p\.[A-Za-z0-9_>+\-/]+)")
+    variant_pattern = re.compile(
+        r"(c\.[A-Za-z0-9_>+\-/]+|p\.(?:\([A-Za-z0-9_>+\-/]+\)|[A-Za-z0-9_>+\-/]+))"
+    )
     zygosity_pattern = re.compile(r"\b(Heterozygous|Homozygous|Hemizygous)\b", re.IGNORECASE)
 
     interpretation_keywords = {
@@ -329,7 +331,7 @@ def parse_report_text(text: str) -> ExtractionResult:
         text,
         (
             ("Variant", r"Variant\s*[:\-]\s*(?P<value>.+)"),
-            r"c\.(?P<value>[A-Za-z0-9_>\-+/]+)",
+            r"(?P<value>c\.[A-Za-z0-9_>+\-/]+|p\.(?:\([A-Za-z0-9_>+\-/]+\)|[A-Za-z0-9_>+\-/]+))",
         ),
     )
     zygosity = _extract_first_match(
