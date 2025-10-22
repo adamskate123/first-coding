@@ -341,13 +341,13 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
     gene_pattern = re.compile(r"\b([A-Z0-9]{2,})\b")
     transcript_pattern = re.compile(r"\b((?:NM|NC|LRG|ENST)[0-9._]+)\b", re.IGNORECASE)
     base_token = r"[A-Za-z0-9_>+\-/]+"
-    spaced_tokens = rf"(?:\s+(?![cp]\.){base_token})*"
+    spaced_tokens = rf"(?:\s+(?![cCpP]\.){base_token})*"
     variant_pattern = re.compile(
         rf"""
         (
-            c\.\s*{base_token}{spaced_tokens}
+            [cC]\.\s*{base_token}{spaced_tokens}
             |
-            p\.\s*
+            [pP]\.\s*
             (?:
                 \(\s*{base_token}{spaced_tokens}\)
                 |
@@ -384,7 +384,9 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
         if not variant_match:
             continue
 
-        candidate_variant = re.sub(r"\s+", "", variant_match.group(1))
+        candidate_variant = _canonicalize_variant_prefix(
+            re.sub(r"\s+", "", variant_match.group(1))
+        )
         fallback_variant = (
             candidate_variant if _is_valid_variant_candidate(candidate_variant) else None
         )
@@ -442,19 +444,30 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
     return fallback
 
 
+def _canonicalize_variant_prefix(token: str) -> str:
+    """Return *token* with HGVS prefix letters normalised to lowercase."""
+
+    match = re.search(r"([cCpP])\.", token)
+    if not match:
+        return token
+
+    prefix_index = match.start(1)
+    return token[:prefix_index] + token[prefix_index].lower() + token[prefix_index + 1 :]
+
+
 def _extract_variant_tokens(value: str) -> List[str]:
     """Return individual HGVS-like tokens from a combined variant string."""
 
     base_token = r"[A-Za-z0-9_>+\-/]+"
-    spaced_tokens = rf"(?:\s+(?![cp]\.){base_token})*"
+    spaced_tokens = rf"(?:\s+(?![cCpP]\.){base_token})*"
     variant_pattern = re.compile(
         rf"""
         (
-            NM_[0-9.]+:\s*[cp]\.\s*{base_token}{spaced_tokens}
+            NM_[0-9.]+:\s*[cCpP]\.\s*{base_token}{spaced_tokens}
             |
-            c\.\s*{base_token}{spaced_tokens}
+            [cC]\.\s*{base_token}{spaced_tokens}
             |
-            p\.\s*
+            [pP]\.\s*
             (?:
                 \(\s*{base_token}{spaced_tokens}\)
                 |
@@ -464,7 +477,10 @@ def _extract_variant_tokens(value: str) -> List[str]:
         """,
         re.VERBOSE,
     )
-    tokens = [re.sub(r"\s+", "", match.group(1)) for match in variant_pattern.finditer(value)]
+    tokens = [
+        _canonicalize_variant_prefix(re.sub(r"\s+", "", match.group(1)))
+        for match in variant_pattern.finditer(value)
+    ]
     if not tokens and value.strip():
         tokens.append(value.strip())
     return tokens
@@ -652,7 +668,7 @@ def parse_report_text(
         text,
         (
             ("Variant", r"Variant\s*[:\-]\s*(?P<value>.+)"),
-            r"(?P<value>c\.[A-Za-z0-9_>+\-/]+|p\.(?:\([A-Za-z0-9_>+\-/]+\)|[A-Za-z0-9_>+\-/]+))",
+            r"(?P<value>[cC]\.[A-Za-z0-9_>+\-/]+|[pP]\.(?:\([A-Za-z0-9_>+\-/]+\)|[A-Za-z0-9_>+\-/]+))",
         ),
     )
     zygosity = _extract_first_match(
