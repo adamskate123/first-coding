@@ -41,6 +41,17 @@ default so offline workflows remain unchanged. The same behaviour can be
 enabled non-interactively by setting the `GENETICS_REPORT_VALIDATE_VARIANTS`
 environment variable to `1`.
 
+Use `--tesseract-config` to forward additional flags to Tesseract. The argument
+accepts one or more values which are joined before being sent to pytesseract,
+allowing commands such as:
+
+```bash
+python genetics_report_parser.py report.png --tesseract-config --psm 6
+```
+
+Specify custom OCR language packs with `--tesseract-lang`, for example
+`--tesseract-lang eng+spa` to enable both English and Spanish dictionaries.
+
 ### Testing
 
 Execute the automated tests with `pytest`:

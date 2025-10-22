@@ -911,7 +911,13 @@ def parse_report_text(
     return result
 
 
-def perform_ocr(image_path: Path, *, include_layout: bool = False) -> OCRResult:
+def perform_ocr(
+    image_path: Path,
+    *,
+    include_layout: bool = False,
+    config: Optional[str] = None,
+    lang: Optional[str] = None,
+) -> OCRResult:
     """Run OCR on *image_path* and optionally capture layout metadata."""
 
     _ensure_ocr_dependencies()
@@ -919,11 +925,18 @@ def perform_ocr(image_path: Path, *, include_layout: bool = False) -> OCRResult:
     layout_words: Optional[List[OCRWord]] = None
 
     with Image.open(image_path) as image:
-        text = pytesseract.image_to_string(image)
+        ocr_kwargs: dict[str, Any] = {}
+        if config is not None:
+            ocr_kwargs["config"] = config
+        if lang is not None:
+            ocr_kwargs["lang"] = lang
+
+        text = pytesseract.image_to_string(image, **ocr_kwargs)
 
         if include_layout:
             try:
-                output_dict = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+                data_kwargs = {"output_type": pytesseract.Output.DICT, **ocr_kwargs}
+                output_dict = pytesseract.image_to_data(image, **data_kwargs)
             except AttributeError:  # pragma: no cover - safety net for unexpected pytesseract builds
                 layout_words = None
             else:
@@ -978,11 +991,15 @@ def perform_ocr(image_path: Path, *, include_layout: bool = False) -> OCRResult:
     return OCRResult(text=text, layout=layout_words)
 
 def extract_from_image(
-    image_path: Path, *, enable_variant_validation: Optional[bool] = None
+    image_path: Path,
+    *,
+    enable_variant_validation: Optional[bool] = None,
+    ocr_config: Optional[str] = None,
+    ocr_lang: Optional[str] = None,
 ) -> ExtractionResult:
     """Extract key fields from a genetics report screenshot."""
 
-    ocr_result = perform_ocr(image_path)
+    ocr_result = perform_ocr(image_path, config=ocr_config, lang=ocr_lang)
     return parse_report_text(ocr_result.text, enable_variant_validation=enable_variant_validation)
 
 
@@ -1008,6 +1025,20 @@ def main() -> None:
             "Requires internet access and is disabled by default."
         ),
     )
+    parser.add_argument(
+        "--tesseract-config",
+        nargs="+",
+        help=(
+            "Additional configuration passed to pytesseract, for example "
+            "`--tesseract-config --psm 6`."
+        ),
+    )
+    parser.add_argument(
+        "--tesseract-lang",
+        help=(
+            "Language(s) passed to pytesseract (e.g. `eng+spa` for English and Spanish)."
+        ),
+    )
     args = parser.parse_args()
 
     image_path = args.image.expanduser()
@@ -1016,8 +1047,12 @@ def main() -> None:
         raise SystemExit(f"File not found: {image_path}")
 
     enable_validation = True if args.validate_variants else None
+    tesseract_config = " ".join(args.tesseract_config) if args.tesseract_config else None
     result = extract_from_image(
-        image_path, enable_variant_validation=enable_validation
+        image_path,
+        enable_variant_validation=enable_validation,
+        ocr_config=tesseract_config,
+        ocr_lang=args.tesseract_lang,
     )
 
     if args.json:
