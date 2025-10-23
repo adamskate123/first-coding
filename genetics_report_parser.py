@@ -410,6 +410,28 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
                 fallback_gene = candidate
                 break
 
+        # Gene symbols can also appear on the preceding lines when reports render
+        # tables with column headers and values on separate rows (e.g. "Gene"
+        # on one line followed by "BRCA1" on the next). Scan a small window of
+        # lines above the variant entry for the nearest plausible symbol.
+        if fallback_gene is None:
+            for prev_idx in range(idx - 1, max(idx - 6, -1), -1):
+                prev_line = lines[prev_idx]
+
+                # Avoid accidentally pulling the gene from an earlier variant
+                # entry when reports list multiple rows back-to-back.
+                if variant_pattern.search(prev_line):
+                    break
+
+                for gene_match in reversed(list(gene_pattern.finditer(prev_line))):
+                    candidate = gene_match.group(1)
+                    if _is_plausible_gene_symbol(candidate):
+                        fallback_gene = candidate
+                        break
+
+                if fallback_gene is not None:
+                    break
+
         # Transcript can appear either before or after the variant token.
         transcript_match = transcript_pattern.search(line)
         if transcript_match:
