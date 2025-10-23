@@ -203,6 +203,18 @@ def test_fallback_preserves_likely_pathogenic_interpretation() -> None:
     assert result.interpretation == "Likely pathogenic"
 
 
+def test_fallback_maps_disease_causing_mutation_to_pathogenic() -> None:
+    sample_text = (
+        "BRCA1 NM_007294.3 c.5266dupC Heterozygous\n"
+        "Classification\n"
+        "Disease-causing mutation\n"
+    )
+
+    result = grp.parse_report_text(sample_text)
+
+    assert result.interpretation == "Pathogenic"
+
+
 def test_fallback_preserves_single_letter_protein_variants() -> None:
     # Some reports list both cDNA and protein descriptions on the same line. When
     # the protein change uses single-letter HGVS notation we must retain it

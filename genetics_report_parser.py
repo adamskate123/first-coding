@@ -368,6 +368,7 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
     interpretation_keywords = [
         ("variant of uncertain significance", "Variant of Uncertain Significance"),
         ("likely pathogenic", "Likely pathogenic"),
+        ("disease-causing mutation", "Pathogenic"),
         ("pathogenic", "Pathogenic"),
         ("uncertain significance", "Variant of Uncertain Significance"),
         ("vus", "Variant of Uncertain Significance"),
@@ -454,6 +455,16 @@ def _extract_table_like_fields(text: str) -> Dict[str, Optional[str]]:
                 if keyword in next_line_lower:
                     fallback_interpretation = canonical
                     break
+            if (
+                fallback_interpretation is None
+                and "classification" in next_line_lower
+                and idx + 2 < len(lines)
+            ):
+                following_line_lower = lines[idx + 2].lower()
+                for keyword, canonical in interpretation_keywords:
+                    if keyword in following_line_lower:
+                        fallback_interpretation = canonical
+                        break
 
         fallback.update(
             {
