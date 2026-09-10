@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Metropolis</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%233c3a35'/%3E%3Crect x='2' y='7' width='4' height='7' fill='%23c9b184'/%3E%3Crect x='7' y='4' width='3' height='10' fill='%238fa3ad'/%3E%3Crect x='11' y='6' width='3' height='8' fill='%23c9a13b'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <header id="topbar">
+    <div class="brand">METROPOLIS</div>
+
+    <div class="readout" title="Treasury">
+      <span class="label">Funds</span>
+      <span class="value" id="stat-funds">$0</span>
+    </div>
+    <div class="readout" title="Residents">
+      <span class="label">Population</span>
+      <span class="value" id="stat-pop">0</span>
+    </div>
+    <div class="readout" title="Citizen approval">
+      <span class="label">Approval</span>
+      <span class="value" id="stat-approval">50%</span>
+    </div>
+    <div class="readout" title="Net monthly balance">
+      <span class="label">Monthly</span>
+      <span class="value" id="stat-balance">$0</span>
+    </div>
+
+    <div class="rci" title="Residential / Commercial / Industrial demand">
+      <div class="rci-bar"><i id="rci-r"></i></div>
+      <div class="rci-bar"><i id="rci-c"></i></div>
+      <div class="rci-bar"><i id="rci-i"></i></div>
+      <div class="rci-labels"><span>R</span><span>C</span><span>I</span></div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="clock">
+      <span id="stat-date">Jan 1950</span>
+      <div class="speeds" id="speeds"></div>
+    </div>
+  </header>
+
+  <aside id="toolbar">
+    <div class="tool-groups" id="tool-groups"></div>
+  </aside>
+
+  <aside id="sidepanel">
+    <div class="panel" id="inspector">
+      <h2>City</h2>
+      <div class="panel-body" id="inspector-body"></div>
+    </div>
+    <div class="panel" id="advisors">
+      <h2>Advisors</h2>
+      <div class="panel-body log" id="advisor-log"></div>
+    </div>
+  </aside>
+
+  <div id="overlaybar">
+    <label for="overlay-select">Data view</label>
+    <select id="overlay-select">
+      <option value="none">None</option>
+      <option value="landvalue">Land value</option>
+      <option value="pollution">Pollution</option>
+      <option value="crime">Crime</option>
+      <option value="traffic">Traffic</option>
+      <option value="power">Power grid</option>
+      <option value="police">Police coverage</option>
+      <option value="fire">Fire coverage</option>
+      <option value="health">Health coverage</option>
+      <option value="education">School coverage</option>
+      <option value="park">Parks &amp; recreation</option>
+    </select>
+    <button id="btn-budget" class="chip">Budget</button>
+    <button id="btn-save" class="chip">Save</button>
+    <button id="btn-load" class="chip">Load</button>
+    <button id="btn-new" class="chip">New city</button>
+  </div>
+
+  <div id="statusline"><span id="status-tool">Inspect</span><span id="status-cost"></span></div>
+  <div id="toast"></div>
+
+  <div id="modal" class="hidden">
+    <div class="modal-card">
+      <h2 id="modal-title">Budget</h2>
+      <div id="modal-body"></div>
+      <div class="modal-actions"><button id="modal-close" class="chip">Close</button></div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,365 @@
+/*
+ * Interface chrome.
+ *
+ * The look borrows from late-90s simulation UI: warm greys, hard bevels,
+ * small tracked-out caps, and panels that sit on top of the map rather than
+ * floating above it. Colour is reserved for data -- the RCI bars, the overlay
+ * ramp, funds going red -- so the eye goes to the city, not the furniture.
+ */
+
+:root {
+  --panel: #3c3a35;
+  --panel-hi: #4a473f;
+  --panel-lo: #2a2823;
+  --edge-light: #63604f;
+  --edge-dark: #1d1b18;
+  --ink: #ded8c6;
+  --ink-dim: #a49d8a;
+  --accent: #d8b25a;
+  --good: #7fb069;
+  --bad: #cf6a55;
+  --r: #62b562;
+  --c: #5b93d6;
+  --i: #d9b048;
+  --font: 'Verdana', 'DejaVu Sans', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #16222a;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#view {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+}
+#view.panning { cursor: grabbing; }
+
+/* ---------------------------------------------------------------- bevels -- */
+
+.bevel {
+  background: var(--panel);
+  border-top: 1px solid var(--edge-light);
+  border-left: 1px solid var(--edge-light);
+  border-bottom: 1px solid var(--edge-dark);
+  border-right: 1px solid var(--edge-dark);
+}
+
+/* ---------------------------------------------------------------- topbar -- */
+
+#topbar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 14px;
+  background: linear-gradient(180deg, #4a473f 0%, #3c3a35 55%, #302e29 100%);
+  border-bottom: 2px solid var(--edge-dark);
+  z-index: 20;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 3px;
+  font-size: 13px;
+  color: var(--accent);
+  text-shadow: 0 1px 0 #000;
+}
+
+.readout { display: flex; flex-direction: column; line-height: 1.25; min-width: 72px; }
+.readout .label {
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.readout .value { font-size: 14px; font-weight: 700; text-shadow: 0 1px 0 #000; }
+.readout .value.negative { color: var(--bad); }
+.readout .value.positive { color: var(--good); }
+
+.spacer { flex: 1; }
+
+/* RCI demand indicator: bars grow up for demand, down for surplus. */
+.rci { display: flex; gap: 4px; align-items: flex-end; position: relative; padding-bottom: 12px; }
+.rci-bar {
+  width: 13px; height: 30px;
+  position: relative;
+  background: #26241f;
+  border: 1px solid var(--edge-dark);
+}
+.rci-bar::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  border-top: 1px dotted #6b6656;
+}
+.rci-bar i { position: absolute; left: 1px; right: 1px; display: block; }
+#rci-r { background: var(--r); }
+#rci-c { background: var(--c); }
+#rci-i { background: var(--i); }
+.rci-labels {
+  position: absolute; bottom: 0; left: 0;
+  display: flex; gap: 4px;
+  font-size: 9px; color: var(--ink-dim);
+}
+.rci-labels span { width: 13px; text-align: center; }
+
+.clock { display: flex; align-items: center; gap: 10px; }
+#stat-date { font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }
+.speeds { display: flex; gap: 2px; }
+
+/* --------------------------------------------------------------- buttons -- */
+
+button {
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--ink);
+  background: linear-gradient(180deg, #4d4a41, #3a3833);
+  border-top: 1px solid var(--edge-light);
+  border-left: 1px solid var(--edge-light);
+  border-bottom: 1px solid var(--edge-dark);
+  border-right: 1px solid var(--edge-dark);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+button:hover { background: linear-gradient(180deg, #5a5649, #45423a); }
+button:active, button.active {
+  background: linear-gradient(180deg, #2c2a26, #3a3833);
+  border-top-color: var(--edge-dark);
+  border-left-color: var(--edge-dark);
+  border-bottom-color: var(--edge-light);
+  border-right-color: var(--edge-light);
+}
+button.active { color: var(--accent); }
+.chip { padding: 4px 10px; }
+
+/* -------------------------------------------------------------- toolbar --- */
+
+#toolbar {
+  position: absolute;
+  top: 46px; left: 0; bottom: 0;
+  width: 150px;
+  overflow-y: auto;
+  background: linear-gradient(90deg, #3c3a35 0%, #35332e 100%);
+  border-right: 2px solid var(--edge-dark);
+  padding: 8px 6px 60px;
+  z-index: 15;
+}
+
+.tool-group { margin-bottom: 12px; }
+.tool-group h3 {
+  margin: 0 0 5px;
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  border-bottom: 1px solid var(--edge-dark);
+  padding-bottom: 3px;
+}
+.tool-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 3px;
+  text-align: left;
+}
+.tool-btn .cost { font-size: 9px; color: var(--ink-dim); }
+.tool-btn.active .cost { color: var(--accent); }
+.swatch {
+  display: inline-block;
+  width: 8px; height: 8px;
+  margin-right: 5px;
+  border: 1px solid var(--edge-dark);
+  vertical-align: baseline;
+}
+
+/* ------------------------------------------------------------ side panel -- */
+
+#sidepanel {
+  position: absolute;
+  top: 46px; right: 0; bottom: 0;
+  width: 242px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: linear-gradient(270deg, #3c3a35 0%, #35332e 100%);
+  border-left: 2px solid var(--edge-dark);
+  z-index: 15;
+  overflow: hidden;
+}
+
+.panel {
+  background: #33312c;
+  border-top: 1px solid var(--edge-light);
+  border-left: 1px solid var(--edge-light);
+  border-bottom: 1px solid var(--edge-dark);
+  border-right: 1px solid var(--edge-dark);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+#inspector { flex: 1 1 auto; }
+#advisors { flex: 0 0 152px; }
+
+.panel h2 {
+  margin: 0;
+  padding: 5px 8px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: linear-gradient(180deg, #46433b, #383630);
+  border-bottom: 1px solid var(--edge-dark);
+}
+.panel-body { padding: 8px; overflow-y: auto; line-height: 1.55; }
+
+.row { display: flex; justify-content: space-between; gap: 8px; }
+.row + .row { margin-top: 2px; }
+.row .k { color: var(--ink-dim); }
+.row .v { font-weight: 700; }
+.subhead {
+  margin: 9px 0 4px;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-bottom: 1px solid #46433b;
+  padding-bottom: 2px;
+}
+
+/* A small horizontal meter used for coverage and congestion. */
+.meter { height: 6px; background: #26241f; border: 1px solid var(--edge-dark); margin-top: 2px; }
+.meter i { display: block; height: 100%; background: var(--good); }
+
+.log div { padding: 3px 0; border-bottom: 1px dotted #46433b; font-size: 11px; }
+.log .warn { color: var(--accent); }
+.log .bad { color: var(--bad); }
+.log .empty { color: var(--ink-dim); font-style: italic; border: 0; }
+
+/* ------------------------------------------------------------- overlaybar - */
+
+#overlaybar {
+  position: absolute;
+  left: 158px; bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(48, 46, 41, 0.94);
+  border-top: 1px solid var(--edge-light);
+  border-left: 1px solid var(--edge-light);
+  border-bottom: 1px solid var(--edge-dark);
+  border-right: 1px solid var(--edge-dark);
+  z-index: 15;
+}
+#overlaybar label {
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+select {
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--ink);
+  background: #2c2a26;
+  border: 1px solid var(--edge-dark);
+  padding: 3px 4px;
+}
+
+/* -------------------------------------------------------------- statusline */
+
+#statusline {
+  position: absolute;
+  left: 158px; top: 54px;
+  display: flex;
+  gap: 10px;
+  padding: 3px 8px;
+  font-size: 11px;
+  background: rgba(30, 28, 25, 0.82);
+  border: 1px solid var(--edge-dark);
+  pointer-events: none;
+  z-index: 14;
+}
+#status-cost { color: var(--accent); font-weight: 700; }
+
+#toast {
+  position: absolute;
+  left: 50%; bottom: 64px;
+  transform: translateX(-50%);
+  padding: 7px 14px;
+  background: rgba(30, 28, 25, 0.95);
+  border: 1px solid var(--accent);
+  color: var(--ink);
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+  z-index: 40;
+}
+#toast.show { opacity: 1; }
+
+/* ------------------------------------------------------------------ modal - */
+
+#modal {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 12, 14, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+#modal.hidden { display: none; }
+.modal-card {
+  width: 400px;
+  max-height: 78vh;
+  overflow-y: auto;
+  padding: 0 0 12px;
+  background: #3c3a35;
+  border-top: 1px solid var(--edge-light);
+  border-left: 1px solid var(--edge-light);
+  border-bottom: 2px solid var(--edge-dark);
+  border-right: 2px solid var(--edge-dark);
+}
+.modal-card h2 {
+  margin: 0 0 10px;
+  padding: 7px 12px;
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: linear-gradient(180deg, #46433b, #383630);
+  border-bottom: 1px solid var(--edge-dark);
+}
+#modal-body { padding: 0 12px; }
+.modal-actions { padding: 10px 12px 0; text-align: right; }
+
+.tax-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.tax-row .k { width: 84px; color: var(--ink-dim); }
+.tax-row input[type=range] { flex: 1; accent-color: var(--accent); }
+.tax-row .v { width: 34px; text-align: right; font-weight: 700; }
+
+/* --------------------------------------------------------------- narrow --- */
+
+@media (max-width: 900px) {
+  #toolbar { width: 118px; }
+  #sidepanel { width: 190px; }
+  #overlaybar { left: 126px; flex-wrap: wrap; max-width: calc(100% - 320px); }
+  #statusline { left: 126px; }
+}
