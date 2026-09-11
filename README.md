@@ -8,7 +8,7 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
-Current version **0.6.1**, shown in the title bar. `VERSION` in
+Current version **0.7.0**, shown in the title bar. `VERSION` in
 `src/config.js` is the single source of truth — `package.json` carries the same
 number for tooling and a test asserts the two agree. Minor versions track
 feature releases; saves record the version that wrote them, though
@@ -210,7 +210,7 @@ tests/              node --test, no DOM required
 npm test            # node --test tests/*.test.js
 ```
 
-142 tests covering the headless half of the game — everything under `src/sim`
+151 tests covering the headless half of the game — everything under `src/sim`
 plus the world model, projection maths, build tools and save format. They
 include regression tests for each bug found so far: the power model energising
 ungrounded wire, the growth oscillation, multi-tile buildings being repainted
@@ -229,10 +229,31 @@ share.
 
 ## Saving
 
-**Save** writes to `localStorage`. Only authored state is stored — terrain,
-what you zoned and built, and how far each lot developed. Every derived field
-is recomputed on load, which keeps a save small and lets old saves survive
-changes to the balance tables.
+**The city saves itself.** It writes to browser storage every 30 seconds while
+you play, whenever the page is hidden or closed, and on demand from **Save** —
+and it resumes automatically when you come back, camera included. Losing a city
+to a reload was the previous behaviour and it was simply wrong.
+
+The other buttons:
+
+| | |
+|---|---|
+| **Save** | Write it out now rather than waiting for the next autosave |
+| **Revert** | Throw away changes since the last save and reload the stored city |
+| **Export** | Download the city as a file you can keep |
+| **Import** | Load a city from a file |
+| **New city** | Start over — this replaces the saved city, so export first if you want it |
+
+Export exists because browser storage is **per browser and per site**: a city
+played at `localhost` is not the city played on the deployed page, and clearing
+site data takes it with it. A file is the only real backup.
+
+Only authored state is stored — terrain, what you zoned and built, how far each
+lot developed, and the year each was built. Every derived field is recomputed on
+load, which keeps a save small and lets old saves survive changes to the balance
+tables. Compatibility is decided by the save `format`, not the game version, so
+a city written by an older build still loads. A save that cannot be read at all
+is discarded and a new city started, rather than leaving you on a blank screen.
 
 ## Known rough edges
 

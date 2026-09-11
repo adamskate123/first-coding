@@ -32,7 +32,7 @@ function decode(b64, Type) {
   return new Type(bytes.buffer, 0, bin.length / Type.BYTES_PER_ELEMENT);
 }
 
-export function serialize(world) {
+export function serialize(world, camera = null) {
   return {
     format: FORMAT,
     // Informational: `format` alone decides compatibility, but knowing which
@@ -57,6 +57,9 @@ export function serialize(world) {
     buildings: [...world.activeBuildings()].map((b) => ({ t: b.type, x: b.x, y: b.y, on: b.on })),
     log: world.log.slice(-20),
     history: world.history.slice(-240),
+    // Where you were looking. Restoring it means resuming puts you back over
+    // your city rather than over the middle of the map.
+    camera: camera ? { x: camera.x, y: camera.y, zoom: camera.zoom } : null,
   };
 }
 
@@ -103,16 +106,28 @@ export function deserialize(data) {
   return world;
 }
 
-export function saveToStorage(world) {
-  localStorage.setItem(SAVE_KEY, JSON.stringify(serialize(world)));
+export function saveToStorage(world, camera = null) {
+  localStorage.setItem(SAVE_KEY, JSON.stringify(serialize(world, camera)));
 }
 
+/**
+ * Read the stored city back.
+ *
+ * Returns the world and the camera separately, since the caller owns the
+ * camera. Throws if the stored data is unreadable -- the caller decides
+ * whether that means starting fresh.
+ */
 export function loadFromStorage() {
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) return null;
-  return deserialize(JSON.parse(raw));
+  const data = JSON.parse(raw);
+  return { world: deserialize(data), camera: data.camera || null };
 }
 
 export function hasSave() {
   return localStorage.getItem(SAVE_KEY) !== null;
+}
+
+export function clearStorage() {
+  localStorage.removeItem(SAVE_KEY);
 }

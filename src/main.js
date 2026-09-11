@@ -7,14 +7,14 @@
  * fast-forwarded one never renders more often than it simulates.
  */
 
-import { MAP_SIZE, SPEED_TICK_MS } from './config.js';
+import { MAP_SIZE, SPEED_TICK_MS, AUTOSAVE_INTERVAL_MS } from './config.js';
 import { World } from './world.js';
 import { Camera, pickTile } from './iso.js';
 import { Simulation } from './sim/index.js';
 import { Renderer } from './render/renderer.js';
 import { ToolController, TOOL } from './tools.js';
 import { UI } from './ui/index.js';
-import { saveToStorage, loadFromStorage, hasSave } from './save.js';
+import { saveToStorage, loadFromStorage, hasSave, serialize, deserialize } from './save.js';
 
 class Game {
   constructor(canvas) {
@@ -24,60 +24,166 @@ class Game {
     this.pointerDown = false;
     this.panning = false;
 
-    this.world = new World(MAP_SIZE, (Math.random() * 0xffffffff) >>> 0);
+    this.lastSaveAt = 0;
+    this.savedLabel = null;
+
+    // Resume the city you were playing. A reload that silently threw it away
+    // and generated a new map is the whole reason this exists.
+    const resumed = this.restore();
+    this.world = resumed ? resumed.world : freshWorld();
     this.sim = new Simulation(this.world);
+    this.sim.topologyDirty = true;
+
     this.camera = new Camera(canvas.width, canvas.height);
-    this.camera.centerOn(MAP_SIZE / 2, MAP_SIZE / 2);
+    if (resumed && resumed.camera) {
+      this.camera.x = resumed.camera.x;
+      this.camera.y = resumed.camera.y;
+      this.camera.zoom = resumed.camera.zoom;
+    } else {
+      this.camera.centerOn(MAP_SIZE / 2, MAP_SIZE / 2);
+    }
+
     this.renderer = new Renderer(canvas, this.world, this.camera);
     this.tools = new ToolController(this);
     this.ui = new UI(this);
 
     this.bindInput();
     this.resize();
-    this.sim.notify('Welcome, Mayor. Lay some road, zone beside it, and connect power.', 'info');
+    if (resumed) {
+      this.sim.notify(`Welcome back, Mayor. Your city stands at ${this.sim.dateLabel}.`, 'info');
+    } else {
+      this.sim.notify('Welcome, Mayor. Lay some road, zone beside it, and connect power.', 'info');
+      this.saveNow();            // so a reload right away resumes this map
+    }
     this.ui.refresh();
     requestAnimationFrame((t) => this.frame(t));
   }
 
   // ------------------------------------------------------------ lifecycle --
 
-  newCity() {
-    this.world = new World(MAP_SIZE, (Math.random() * 0xffffffff) >>> 0);
-    this.sim = new Simulation(this.world);
-    this.renderer.world = this.world;
+  /**
+   * Read the autosaved city, or null if there isn't one.
+   *
+   * A corrupt or half-written save must not brick the game: now that startup
+   * loads automatically, an unreadable one has to fall back to a new map
+   * rather than leaving a blank screen.
+   */
+  restore() {
+    if (!hasSave()) return null;
+    try {
+      return loadFromStorage();
+    } catch (err) {
+      console.warn('Stored city could not be read; starting a new one.', err);
+      return null;
+    }
+  }
+
+  /** Swap in a world, pointing everything that holds a reference at it. */
+  adopt(world) {
+    this.world = world;
+    this.sim = new Simulation(world);
+    this.sim.topologyDirty = true;
+    this.renderer.world = world;
     this.tools.cancel();
     this.ui.selected = null;
-    this.camera.centerOn(MAP_SIZE / 2, MAP_SIZE / 2);
-    this.sim.notify('A fresh site. Good luck.', 'info');
     this.renderer.markDirty();
     this.ui.refresh();
   }
 
-  save() {
+  newCity() {
+    this.adopt(freshWorld());
+    this.camera.centerOn(MAP_SIZE / 2, MAP_SIZE / 2);
+    this.sim.notify('A fresh site. Good luck.', 'info');
+    // Replace the autosave straight away, so a reload resumes *this* city
+    // rather than resurrecting the one just abandoned.
+    this.saveNow();
+    this.ui.refresh();
+  }
+
+  /** Write the city out now, whatever the autosave timer says. */
+  saveNow() {
     try {
-      saveToStorage(this.world);
-      this.toast('City saved.');
+      saveToStorage(this.world, this.camera);
+      this.lastSaveAt = Date.now();
+      this.savedLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      this.ui?.setSaveStatus(this.savedLabel);
+      return true;
     } catch (err) {
+      // Quota exhausted, or storage blocked in a private window.
+      this.ui?.setSaveStatus('failed');
       this.toast('Could not save: ' + err.message);
+      return false;
     }
   }
 
+  /** Called every tick; writes at most once per AUTOSAVE_INTERVAL_MS. */
+  autoSave() {
+    if (Date.now() - this.lastSaveAt < AUTOSAVE_INTERVAL_MS) return;
+    this.saveNow();
+  }
+
+  save() {
+    if (this.saveNow()) this.toast('City saved.');
+  }
+
   load() {
-    if (!hasSave()) { this.toast('No saved city found.'); return; }
-    try {
-      const world = loadFromStorage();
-      this.world = world;
-      this.sim = new Simulation(world);
-      this.sim.topologyDirty = true;
-      this.renderer.world = world;
-      this.tools.cancel();
-      this.ui.selected = null;
+    const restored = this.restore();
+    if (!restored) { this.toast('No saved city found.'); return; }
+    this.adopt(restored.world);
+    if (restored.camera) {
+      this.camera.x = restored.camera.x;
+      this.camera.y = restored.camera.y;
+      this.camera.zoom = restored.camera.zoom;
       this.renderer.markDirty();
-      this.ui.refresh();
-      this.toast('City loaded.');
-    } catch (err) {
-      this.toast('Could not load: ' + err.message);
     }
+    this.toast('Reverted to the saved city.');
+  }
+
+  /** Hand the player a file they can keep. Browser storage is per-browser
+   *  and per-site, and a cleared cache takes it with them. */
+  exportCity() {
+    try {
+      const data = JSON.stringify(serialize(this.world, this.camera));
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `metropolis-${this.world.year}-${String(this.world.month + 1).padStart(2, '0')}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      this.toast('City exported.');
+    } catch (err) {
+      this.toast('Could not export: ' + err.message);
+    }
+  }
+
+  importCity() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(String(reader.result));
+          this.adopt(deserialize(data));
+          if (data.camera) {
+            this.camera.x = data.camera.x;
+            this.camera.y = data.camera.y;
+            this.camera.zoom = data.camera.zoom;
+            this.renderer.markDirty();
+          }
+          this.saveNow();
+          this.toast('City imported.');
+        } catch (err) {
+          this.toast('Not a readable city file.');
+        }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
   }
 
   setSpeed(s) {
@@ -101,6 +207,7 @@ class Game {
       this.renderer.markDirty();
       // The readouts are cheap, but not free -- refresh a few times a second.
       if (this.world.tick % 4 === 0) this.ui.refresh();
+      this.autoSave();
     }
     this.renderer.render();
     requestAnimationFrame((t) => this.frame(t));
@@ -129,6 +236,14 @@ class Game {
   bindInput() {
     const c = this.canvas;
     window.addEventListener('resize', () => this.resize());
+
+    // Flush on the way out. `pagehide` fires where `beforeunload` does not --
+    // notably on mobile and when a page enters the back/forward cache -- and
+    // the visibility check covers tab switches and app backgrounding.
+    window.addEventListener('pagehide', () => this.saveNow());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.saveNow();
+    });
 
     c.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -214,6 +329,10 @@ class Game {
     const cost = t.previewCost || 0;
     this.ui.setCost(cost, cost <= this.world.funds);
   }
+}
+
+function freshWorld() {
+  return new World(MAP_SIZE, (Math.random() * 0xffffffff) >>> 0);
 }
 
 const canvas = document.getElementById('view');

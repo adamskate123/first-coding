@@ -295,6 +295,15 @@ select {
 
 /* -------------------------------------------------------------- statusline */
 
+#save-status {
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+#save-status.failed { color: var(--bad); }
+
 #statusline {
   position: absolute;
   left: 158px; top: 54px;
@@ -371,5 +380,14 @@ select {
   #toolbar { width: 118px; }
   #sidepanel { width: 190px; }
   #overlaybar { left: 126px; flex-wrap: wrap; max-width: calc(100% - 320px); }
-  #statusline { left: 126px; }
+  #save-status {
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+#save-status.failed { color: var(--bad); }
+
+#statusline { left: 126px; }
 }
