@@ -125,6 +125,22 @@ export function flatQuad(x, y, height) {
   ];
 }
 
+/**
+ * A point on a tile's drawn surface, from tile-local coordinates: (0,0) at the
+ * tile's origin corner, (1,1) at the far one.
+ *
+ * Bilinear across the same four corners the tile was painted with, so anything
+ * placed this way -- a car on the road, say -- sits on the surface as drawn,
+ * whether that is sloping ground or a bridge deck.
+ */
+export function quadPoint(q, u, v) {
+  const ax = q[0].x + (q[1].x - q[0].x) * u;
+  const ay = q[0].y + (q[1].y - q[0].y) * u;
+  const bx = q[3].x + (q[2].x - q[3].x) * u;
+  const by = q[3].y + (q[2].y - q[3].y) * u;
+  return { x: ax + (bx - ax) * v, y: ay + (by - ay) * v };
+}
+
 /** Which side of the line a->b the point falls on. */
 function side(px, py, a, b) {
   return (px - b.x) * (a.y - b.y) - (a.x - b.x) * (py - b.y);

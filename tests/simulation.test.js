@@ -588,31 +588,34 @@ test('an advisory returns once enough time has passed', () => {
 
 // ------------------------------------------------------- power spreading --
 
-test('a vacant lot draws power from the developed lot next door', () => {
-  // Otherwise an undeveloped tile conducts nothing, so it is never powered, so
-  // it never develops -- forcing a pylon onto literally every zoned tile.
+test('power flows through zoned land, not just what is built on it', () => {
+  // Wiring the edge of a district used to power exactly one row of it: vacant
+  // lots did not conduct, and a dilation pass reached only one step further.
+  // The rest of the district read as dark until it happened to build out.
   const w = flatWorld(30);
   w.placeBuilding('coal', 1, 1);
   for (let y = 4; y <= 10; y++) w.powerLine[w.idx(1, y)] = 1;
   for (let x = 1; x <= 6; x++) w.powerLine[w.idx(x, 10)] = 1;
 
-  // Zone a block beside the line, with no pylons on it at all.
-  for (let x = 2; x <= 6; x++) w.zone[w.idx(x, 11)] = Z.R_LOW;
+  // A block of empty zoning touching the line at one corner only.
+  for (let y = 11; y <= 16; y++) for (let x = 2; x <= 10; x++) w.zone[w.idx(x, y)] = Z.R_LOW;
 
   updatePower(w);
+
   assert.equal(w.powered[w.idx(3, 11)], 1, 'the lot beside the line is served');
+  assert.equal(w.powered[w.idx(3, 14)], 1, 'and so is one deep inside the block');
+  assert.equal(w.powered[w.idx(10, 16)], 1, 'and the far corner of it');
 });
 
-test('the spread is one lot deep, not unlimited', () => {
+test('vacant lots draw no power, so conducting through them costs nothing', () => {
   const w = flatWorld(30);
   w.placeBuilding('coal', 1, 1);
   for (let y = 4; y <= 10; y++) w.powerLine[w.idx(1, y)] = 1;
-  for (let x = 1; x <= 6; x++) w.powerLine[w.idx(x, 10)] = 1;
-  for (let y = 11; y <= 14; y++) for (let x = 2; x <= 6; x++) w.zone[w.idx(x, y)] = Z.R_LOW;
+  for (let y = 11; y <= 20; y++) for (let x = 1; x <= 20; x++) w.zone[w.idx(x, y)] = Z.R_HIGH;
 
   updatePower(w);
-  assert.equal(w.powered[w.idx(3, 11)], 1, 'the first row is served');
-  assert.equal(w.powered[w.idx(3, 12)], 0, 'the second row waits for the first to build');
+  assert.equal(w.stats.powerDemand, 0, 'empty zoning asked for power');
+  assert.equal(w.stats.brownout, false);
 });
 
 test('an unpowered grid still serves nothing, however it is zoned', () => {

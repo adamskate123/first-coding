@@ -8,7 +8,7 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
-Current version **0.7.1**, shown in the title bar. `VERSION` in
+Current version **0.9.0**, shown in the title bar. `VERSION` in
 `src/config.js` is the single source of truth — `package.json` carries the same
 number for tooling and a test asserts the two agree. Minor versions track
 feature releases; saves record the version that wrote them, though
@@ -44,10 +44,12 @@ much to maintain, which makes *where* you put them a real decision.
 | `0` `1` `2` `3` | Speed: paused, slow, normal, fast |
 | `B` | Bulldoze |
 | `G` | Toggle the tile grid |
+| `V` | Show or hide the traffic |
 | `Esc` | Cancel the current drag |
 
 The **Data view** dropdown overlays land value, pollution, crime, traffic, the
-power grid, and each service's coverage. **Budget** sets tax rates separately
+power grid, and each service's coverage. **Cars** turns the moving traffic on
+and off. **Budget** sets tax rates separately
 for residential, commercial and industrial.
 
 ## How the simulation works
@@ -59,9 +61,10 @@ instead of spiking whenever a slow system comes due.
 **Power** is not a global pool. Tiles conduct to their orthogonal neighbours,
 so the map partitions into independent networks and each balances its own
 supply against its own demand. A district wired to nothing browns out while a
-plant across town sits idle. Power reaches a vacant lot from the lot next door,
-one lot deep, so a block builds outward from the grid rather than needing a
-pylon on every tile.
+plant across town sits idle. Zoned land conducts whether or not anything stands
+on it yet, so wiring the edge of a district serves all of it — a lot with
+nothing on it draws nothing, so this cannot let a network carry load it has not
+accounted for.
 
 **Traffic** routes aggregate commuter flow rather than individual cars. A
 multi-source breadth-first sweep builds a distance-to-work field over the road
@@ -69,6 +72,16 @@ graph, and every populated tile walks downhill along it, depositing load on the
 roads it crosses. Flow concentrates on the links that join districts, so a lone
 arterial saturates while parallel routes sit empty — and congestion feeds back
 into land value and pollution.
+
+**The cars you can see** are driven off that field rather than replacing it.
+Where they spawn is weighted by the traffic each tile carries, and they slow as
+that tile approaches its capacity, so a jam looks like a jam — dense and
+crawling — and a glance at a junction tells you which way the city commutes.
+They carry nobody and are never saved; a reloaded city puts its own traffic back
+within a second. Drawing them is the one thing that repaints without the city
+having changed, so it is held to a share of the clock: thirty frames a second
+where the scene is cheap to draw, slower where it is not, and nothing at all
+while the game is paused.
 
 **Land value** is the number the market consults. Amenity raises it
 (waterfront, trees, parks, schools, safety); nuisance lowers it (pollution,
@@ -195,6 +208,7 @@ src/
     networks.js     road access and the power grid
     fields.js       coverage, pollution, crime, land value
     traffic.js      commuter flow
+    vehicles.js     the cars you can see driving
     demand.js       RCI demand
     growth.js       zone development and abandonment
     economy.js      budget and civic approval
@@ -289,8 +303,11 @@ is discarded and a new city started, rather than leaving you on a blank screen.
 - [ ] **Public transit** — bus routes and rail, sharing the commuter-flow
       solver that already exists.
 - [ ] **Districts and policies**: paint an area, apply rules to it.
+- [x] **Moving traffic** — a few hundred cars driven off the traffic field,
+      spawned where the load is and slowed where it saturates.
 - [ ] **Individual agent simulation** to replace aggregate commuter flow, so
-      citizens have homes, jobs and journeys you can follow.
+      citizens have homes, jobs and journeys you can follow. The visible cars
+      are a read-out of the aggregate model, not that.
 - [ ] **Graphs and history**, using the monthly snapshots already recorded.
 - [ ] **Larger maps with chunked terrain caching**, once redraw cost justifies
       it.

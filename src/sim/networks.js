@@ -12,7 +12,7 @@
  * they run over every tile on the map several times a second.
  */
 
-import { ROAD_REACH, BUILDINGS, BUILDING_POWER, ZONE_INFO, T, SEA_LEVEL, BRIDGE_CLEARANCE } from '../config.js';
+import { ROAD_REACH, BUILDINGS, BUILDING_POWER, ZONE_INFO, Z, T, SEA_LEVEL, BRIDGE_CLEARANCE } from '../config.js';
 
 /**
  * Flood outwards from every road tile and mark tiles within ROAD_REACH.
@@ -117,6 +117,7 @@ export function updateBridgeDecks(world) {
     span.length = 0;
     stack.push(start);
     seen[start] = 1;
+    const approaches = new Set();
 
     while (stack.length) {
       const i = stack.pop();
@@ -132,17 +133,35 @@ export function updateBridgeDecks(world) {
           if (!seen[j]) { seen[j] = 1; stack.push(j); }
         } else if (world.road[j] !== 0) {
           height = Math.max(height, approachHeight(world, j, APPROACH_REACH));
+          approaches.add(j);
         }
       }
     }
 
     for (const i of span) deck[i] = height;
+    // The road tile on each bank carries the deck too, as an abutment. Without
+    // it the carriageway followed the shoreline down -- terrain smoothing pulls
+    // the water's edge towards the waterline -- and the span appeared to start
+    // in mid-air, with the road diving away beneath it.
+    for (const i of approaches) deck[i] = Math.max(deck[i], height);
   }
 }
 
-/** Does this tile carry power to its neighbours? */
+/**
+ * Does this tile carry power to its neighbours?
+ *
+ * Zoned land conducts whether or not anything stands on it yet. Only built
+ * tiles used to, with vacant lots reached one step further by a dilation pass
+ * -- which meant wiring the edge of a district powered exactly one row of it
+ * and the rest read as dark, both on the map and in the overlay. Serviced land
+ * is serviced land; a lot with nothing on it draws nothing, so this cannot let
+ * a network carry load it has not accounted for.
+ */
 function conducts(world, i) {
-  return world.powerLine[i] === 1 || world.level[i] > 0 || world.build[i] !== -1;
+  return world.powerLine[i] === 1
+    || world.zone[i] !== Z.NONE
+    || world.level[i] > 0
+    || world.build[i] !== -1;
 }
 
 /**
@@ -216,28 +235,6 @@ export function updatePower(world) {
       unservedDemand += net.demand;
     }
   }
-
-  // Power reaches a *vacant* lot from the lot next door. Without this, an
-  // undeveloped tile conducts nothing, so it can never be powered, so it can
-  // never develop -- and the player is forced to run a pylon onto every single
-  // tile they zone. One dilation step reproduces the familiar behaviour: wire
-  // the grid to the edge of a block and it builds out from there, each new
-  // building carrying power to its own neighbours.
-  //
-  // Only level-0 tiles are dilated, and those draw no power, so this cannot
-  // let a network serve load it has not accounted for.
-  const reached = [];
-  for (let i = 0; i < n; i++) {
-    if (world.zone[i] === 0 || world.level[i] !== 0 || world.powered[i]) continue;
-    const x = i % s, y = (i / s) | 0;
-    if ((x > 0 && world.powered[i - 1]) ||
-        (x < s - 1 && world.powered[i + 1]) ||
-        (y > 0 && world.powered[i - s]) ||
-        (y < s - 1 && world.powered[i + s])) {
-      reached.push(i);
-    }
-  }
-  for (const i of reached) world.powered[i] = 1;
 
   for (const b of world.activeBuildings()) {
     b.powered = world.powered[world.idx(b.x, b.y)] === 1;
