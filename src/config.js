@@ -9,7 +9,7 @@
  * Minor versions track feature releases (bridges, wealth tiers, eras, relief);
  * the patch digit is for fixes and tuning.
  */
-export const VERSION = '0.6.1';
+export const VERSION = '0.7.0';
 
 /**
  * Central tuning constants.
@@ -35,6 +35,16 @@ export const SPEED_LABELS = ['Paused', 'Slow', 'Normal', 'Fast'];
 export const SPEED_TICK_MS = [Infinity, 420, 150, 45];
 export const START_YEAR = 1900;
 export const START_FUNDS = 60000;
+
+/**
+ * How often the city is written to browser storage while you play.
+ *
+ * A city builder that loses your work to a reload is broken, so the game keeps
+ * one autosaved city and resumes it on load. Serialising a 96x96 map costs a
+ * couple of milliseconds, so this is throttled on wall-clock time rather than
+ * game time -- otherwise fast-forwarding would save many times a second.
+ */
+export const AUTOSAVE_INTERVAL_MS = 30000;
 
 // ----------------------------------------------------------------- terrain --
 

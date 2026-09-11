@@ -76,9 +76,12 @@
       <option value="park">Parks &amp; recreation</option>
     </select>
     <button id="btn-budget" class="chip">Budget</button>
-    <button id="btn-save" class="chip">Save</button>
-    <button id="btn-load" class="chip">Load</button>
+    <button id="btn-save" class="chip" title="Write the city out now. It also autosaves as you play.">Save</button>
+    <button id="btn-load" class="chip" title="Discard changes since the last save and reload the stored city.">Revert</button>
+    <button id="btn-export" class="chip" title="Download the city as a file you can keep or move to another browser.">Export</button>
+    <button id="btn-import" class="chip" title="Load a city from a file.">Import</button>
     <button id="btn-new" class="chip">New city</button>
+    <span id="save-status" title="The city autosaves to this browser as you play."></span>
   </div>
 
   <div id="statusline"><span id="status-tool">Inspect</span><span id="status-cost"></span></div>

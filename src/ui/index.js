@@ -130,9 +130,16 @@ export class UI {
     });
     document.getElementById('btn-budget').addEventListener('click', () => this.showBudget());
     document.getElementById('btn-save').addEventListener('click', () => this.game.save());
-    document.getElementById('btn-load').addEventListener('click', () => this.game.load());
+    document.getElementById('btn-load').addEventListener('click', () => {
+      if (confirm('Discard changes since the last save and reload the stored city?')) this.game.load();
+    });
+    document.getElementById('btn-export').addEventListener('click', () => this.game.exportCity());
+    document.getElementById('btn-import').addEventListener('click', () => this.game.importCity());
     document.getElementById('btn-new').addEventListener('click', () => {
-      if (confirm('Abandon this city and start a new one?')) this.game.newCity();
+      // The autosave holds one city, so starting over really does replace it.
+      if (confirm('Start a new city? This replaces the saved city in this browser. Export it first if you want to keep it.')) {
+        this.game.newCity();
+      }
     });
     document.getElementById('modal-close').addEventListener('click', () => this.closeModal());
     document.getElementById('modal').addEventListener('click', (e) => {
@@ -376,6 +383,15 @@ export class UI {
   }
 
   closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+  /** Show when the city was last written out, or that writing failed. */
+  setSaveStatus(label) {
+    const el = document.getElementById('save-status');
+    if (!el) return;
+    const failed = label === 'failed';
+    el.classList.toggle('failed', failed);
+    el.textContent = failed ? 'Save failed' : label ? `Saved ${label}` : '';
+  }
 
   toast(text) {
     const el = document.getElementById('toast');
