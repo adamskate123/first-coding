@@ -10,9 +10,9 @@
  * there is no reason to burn a frame re-painting an unchanged skyline.
  */
 
-import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE } from '../config.js';
+import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, ROAD_INFO, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE } from '../config.js';
 import { tileToWorld, tileQuad, flatQuad } from '../iso.js';
-import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, LOT, heatColor, shade } from './palette.js';
+import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, LOT, heatColor, shade, mix } from './palette.js';
 import { zoneSprite, buildingSprite, treeSprite, VARIANTS } from './sprites.js';
 import { hash2, clamp } from '../util.js';
 
@@ -138,7 +138,7 @@ export class Renderer {
 
     // --- what the player put there ----------------------------------------
     if (w.road[i]) {
-      if (terrain === T.WATER) this.drawBridge(x, y, i);
+      if (w.deckHeight[i] > 0) this.drawBridge(x, y, i, terrain);
       else this.drawRoad(x, y, i, quad);
     }
 
@@ -277,7 +277,16 @@ export class Renderer {
 
     // The carriageway is the tile's own surface, so a road rides the slope
     // rather than sitting on a plate above or below it.
-    ctx.fillStyle = isAvenue ? ROAD_COLORS.avenue : ROAD_COLORS.street;
+    //
+    // Busy roads darken towards red. Free-running ones keep their ordinary
+    // tarmac, so congestion reads as something gone wrong rather than as a
+    // permanent colour scheme -- you can see where the city is choking without
+    // opening the traffic view.
+    let surface = isAvenue ? ROAD_COLORS.avenue : ROAD_COLORS.street;
+    const load = w.traffic[i] / ROAD_INFO[w.road[i]].capacity;
+    const strain = clamp((load - 0.35) / 0.75, 0, 1);
+    if (strain > 0) surface = mix(surface, ROAD_COLORS.congested, strain * 0.72);
+    ctx.fillStyle = surface;
     this.quadPath(quad);
     ctx.fill();
 
@@ -307,7 +316,7 @@ export class Renderer {
    * still paints it in the right order -- the piers stop at the waterline
    * rather than hanging down into the tile in front.
    */
-  drawBridge(x, y, i) {
+  drawBridge(x, y, i, terrain) {
     const ctx = this.ctx;
     const w = this.world;
     // The span sits at the level of the banks it joins, worked out per span in
@@ -320,8 +329,10 @@ export class Renderer {
     // on every frame a bridge was visible, which killed the animation loop and
     // froze the game outright.
     const deckQuad = flatQuad(x, y, height);
-    // Piers reach from the deck down to the waterline, however high it sits.
-    const lift = (height - SEA_LEVEL) * ELEV_STEP;
+    // Piers reach from the deck down to whatever is beneath: the waterline out
+    // over the channel, the ground itself where the deck lands on a bank.
+    const base = terrain === T.WATER ? SEA_LEVEL : w.tileHeight(x, y);
+    const lift = Math.max(0, (height - base) * ELEV_STEP);
 
     // piers dropping to the waterline
     ctx.fillStyle = '#544f46';

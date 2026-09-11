@@ -225,9 +225,25 @@ export class UI {
     rows.push(row('Approval', `${st.approval}%`));
 
     rows.push('<div class="subhead">Power</div>');
-    rows.push(row('Supply', commas(st.powerSupply)));
-    rows.push(row('Demand', commas(st.powerDemand)));
-    if (st.brownout) rows.push('<div class="row"><span class="k" style="color:var(--bad)">Grid is browning out</span></div>');
+    rows.push(row('Produced', commas(st.powerSupply)));
+    rows.push(row('Consumed', commas(st.powerDemand)));
+
+    // How close the grid is to its limit, which the two raw figures alone made
+    // you work out for yourself.
+    const load = st.powerSupply > 0
+      ? st.powerDemand / st.powerSupply
+      : (st.powerDemand > 0 ? 1 : 0);
+    const headroom = st.powerSupply - st.powerDemand;
+    rows.push(row('Spare capacity', st.powerSupply > 0 ? commas(headroom) : '-'));
+    rows.push(row('Grid load', st.powerSupply > 0 ? `${Math.round(load * 100)}%`
+      : (st.powerDemand > 0 ? 'No supply' : '-')));
+    rows.push(meter(clamp(load, 0, 1),
+      load >= 1 ? 'var(--bad)' : load > 0.85 ? 'var(--accent)' : 'var(--good)'));
+
+    if (st.brownout) {
+      const short = Math.round((st.brownoutShare ?? 0) * 100);
+      rows.push(`<div class="row"><span class="k" style="color:var(--bad)">Browning out — ${short}% of demand unserved</span></div>`);
+    }
 
     rows.push('<div class="subhead">Environment</div>');
     rows.push(row('Avg land value', Math.round(st.avgLandValue)));

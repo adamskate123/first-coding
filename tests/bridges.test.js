@@ -332,3 +332,38 @@ test('land tiles never get a deck height', () => {
   assert.equal(w.deckHeight[w.idx(10, 15)], 0, 'road on dry land was given a deck');
   assert.equal(w.deckHeight[w.idx(5, 5)], 0);
 });
+
+test('the road tile on each bank carries the deck as an abutment', () => {
+  // Without it the carriageway followed the shoreline down -- terrain
+  // smoothing pulls the water's edge towards the waterline -- so the span
+  // appeared to begin in mid-air with the road diving away beneath it.
+  const w = channelWorld();
+  const game = fakeGame(w);
+  dragRoad(game, 'STREET', { x: 10, y: 15 }, { x: 20, y: 15 });
+  updateBridgeDecks(w);
+
+  const deck = w.deckHeight[w.idx(14, 15)];
+  assert.ok(deck > 0, 'the span has no deck height');
+  assert.equal(w.deckHeight[w.idx(12, 15)], deck, 'the west bank has no abutment');
+  assert.equal(w.deckHeight[w.idx(17, 15)], deck, 'the east bank has no abutment');
+});
+
+test('the abutment does not spread further inland than one tile', () => {
+  const w = channelWorld();
+  const game = fakeGame(w);
+  dragRoad(game, 'STREET', { x: 10, y: 15 }, { x: 20, y: 15 });
+  updateBridgeDecks(w);
+  assert.equal(w.deckHeight[w.idx(11, 15)], 0, 'the deck ran on up the bank');
+  assert.equal(w.deckHeight[w.idx(18, 15)], 0, 'the deck ran on up the bank');
+});
+
+test('the abutment is level with the deck it meets', () => {
+  const w = channelWorld();
+  const game = fakeGame(w);
+  dragRoad(game, 'STREET', { x: 10, y: 15 }, { x: 20, y: 15 });
+  updateBridgeDecks(w);
+
+  const heights = new Set();
+  for (let x = 12; x <= 17; x++) heights.add(w.deckHeight[w.idx(x, 15)]);
+  assert.equal(heights.size, 1, `abutments and deck disagree: ${[...heights].join(', ')}`);
+});

@@ -8,7 +8,7 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
-Current version **0.7.1**, shown in the title bar. `VERSION` in
+Current version **0.8.0**, shown in the title bar. `VERSION` in
 `src/config.js` is the single source of truth — `package.json` carries the same
 number for tooling and a test asserts the two agree. Minor versions track
 feature releases; saves record the version that wrote them, though
@@ -59,9 +59,10 @@ instead of spiking whenever a slow system comes due.
 **Power** is not a global pool. Tiles conduct to their orthogonal neighbours,
 so the map partitions into independent networks and each balances its own
 supply against its own demand. A district wired to nothing browns out while a
-plant across town sits idle. Power reaches a vacant lot from the lot next door,
-one lot deep, so a block builds outward from the grid rather than needing a
-pylon on every tile.
+plant across town sits idle. Zoned land conducts whether or not anything stands
+on it yet, so wiring the edge of a district serves all of it — a lot with
+nothing on it draws nothing, so this cannot let a network carry load it has not
+accounted for.
 
 **Traffic** routes aggregate commuter flow rather than individual cars. A
 multi-source breadth-first sweep builds a distance-to-work field over the road
@@ -263,6 +264,7 @@ is discarded and a new city started, rather than leaving you on a blank screen.
 - A century of game time is a long session at present pacing, so a single city
   will usually span one or two architectural periods rather than all four.
 - Avenues carry more traffic than streets but draw at the same width.
+- Traffic shows as colour on the road rather than as moving vehicles.
 - Lots are one tile, so there are no large footprint buildings in the zones --
   only service buildings span more than a tile.
 - Data overlays draw over buildings rather than flattening the city, so a

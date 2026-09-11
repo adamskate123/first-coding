@@ -27,6 +27,8 @@ export const ROAD_COLORS = {
   streetEdge: '#5c5952',
   avenue: '#66635c',
   markings: '#c9c2a8',
+  // Where the tarmac heads as a road jams up.
+  congested: '#9c4a38',
 };
 
 /**

@@ -1,6 +1,6 @@
 {
   "name": "metropolis",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "A browser city-building simulator: SimCity 3000 presentation, Cities: Skylines simulation depth.",
   "type": "module",
   "private": true,
