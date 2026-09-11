@@ -16,6 +16,7 @@ import { Renderer } from './render/renderer.js';
 import { ToolController, TOOL } from './tools.js';
 import { UI } from './ui/index.js';
 import { saveToStorage, loadFromStorage, hasSave, serialize, deserialize } from './save.js';
+import { UpdateWatch } from './update.js';
 
 class Game {
   constructor(canvas) {
@@ -60,6 +61,7 @@ class Game {
       this.saveNow();            // so a reload right away resumes this map
     }
     this.ui.refresh();
+    this.updates = new UpdateWatch({ onReady: (v) => this.ui.showUpdate(v) }).start();
     requestAnimationFrame((t) => this.frame(t));
   }
 
@@ -103,6 +105,18 @@ class Game {
     // rather than resurrecting the one just abandoned.
     this.saveNow();
     this.ui.refresh();
+  }
+
+  /**
+   * Take the new build: write the city out first, then reload.
+   *
+   * The save matters. Autosaves are half a minute apart, so reloading on the
+   * banner's say-so could otherwise cost whatever was laid since the last one
+   * -- and losing a district to an update notice would be a poor trade.
+   */
+  applyUpdate() {
+    this.saveNow();
+    location.reload();
   }
 
   /** Write the city out now, whatever the autosave timer says. */

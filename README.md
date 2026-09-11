@@ -8,7 +8,7 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
-Current version **0.9.0**, shown in the title bar. `VERSION` in
+Current version **0.10.0**, shown in the title bar. `VERSION` in
 `src/config.js` is the single source of truth — `package.json` carries the same
 number for tooling and a test asserts the two agree. Minor versions track
 feature releases; saves record the version that wrote them, though
@@ -49,8 +49,45 @@ much to maintain, which makes *where* you put them a real decision.
 
 The **Data view** dropdown overlays land value, pollution, crime, traffic, the
 power grid, and each service's coverage. **Cars** turns the moving traffic on
-and off. **Budget** sets tax rates separately
+and off.
+
+When a new version has been deployed, a banner says so and offers a reload;
+taking it writes the city out first, so nothing laid since the last autosave is
+lost. Nothing reloads on its own — dropping a city mid-placement to pick up a
+cosmetic change would be worse than the staleness it fixes. **Budget** sets tax rates separately
 for residential, commercial and industrial.
+
+## Staying current, and working offline
+
+GitHub Pages serves everything with `Cache-Control: max-age=600`, so a deploy
+does not reach an open tab, and often does not reach a reload either — each
+module expires on its own stagger. Measured against a server sending that exact
+header: a reload after a deploy served the **old** build, and a plain fetch of
+the version manifest still reported the old version.
+
+Two pieces fix it, and each was measured against the same header:
+
+- **A service worker** (`sw.js`) fetches everything for this origin with the
+  HTTP cache stepped over (`cache: 'no-store'`) and keeps what comes back only
+  as a fallback for when the network is gone. Same experiment, with it in
+  charge: the reload served the **new** build. It is registered with the version
+  in its URL, so a release is a new script to the browser rather than something
+  it might get round to noticing.
+- **An update notice.** The page fetches `version.json` past the cache — the one
+  request that must not be cached, since `no-store` is the difference between
+  reporting the old version forever and seeing the deploy at once — every five
+  minutes and whenever the tab comes back to the front. If the deployed version
+  is not the one running, the banner appears.
+
+The fallback cache means the city is playable with no network at all, which the
+old arrangement never was. The first visit after the worker installs still comes
+from the HTTP cache; every load after that does not.
+
+If the worker ever needs to be cleared out, this in the browser console does it:
+
+```js
+navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister()));
+```
 
 ## How the simulation works
 
@@ -197,12 +234,15 @@ so it is held in a bounded LRU rather than a plain map.
 ```
 index.html          shell and UI chrome
 styles.css          interface styling
+sw.js               service worker: freshness, and offline play
+version.json        the deployed version, polled by the update notice
 src/
   config.js         every balance and presentation constant
   world.js          tile state (struct-of-arrays) and terrain generation
   iso.js            projection, camera, cursor picking
   tools.js          build tools and pointer handling
   save.js           serialisation
+  update.js         noticing that a new version has been deployed
   sim/
     index.js        tick orchestration
     networks.js     road access and the power grid

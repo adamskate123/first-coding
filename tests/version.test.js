@@ -3,8 +3,11 @@
  *
  * A version string is only useful if every place that shows one agrees. The
  * game reads `VERSION` from the configuration; `package.json` carries the same
- * number for tooling. These tests exist so the two cannot drift apart quietly,
- * which is the usual fate of a hand-maintained version.
+ * number for tooling; `version.json` publishes it to the running page, which is
+ * how an open tab learns that a new build has been deployed. These tests exist
+ * so the three cannot drift apart quietly, which is the usual fate of a
+ * hand-maintained version -- and a stale `version.json` would be worse than no
+ * update check at all, since it would either never fire or never stop.
  */
 
 import test from 'node:test';
@@ -17,6 +20,7 @@ import { serialize, deserialize } from '../src/save.js';
 import { T } from '../src/config.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const manifest = JSON.parse(readFileSync(new URL('../version.json', import.meta.url), 'utf8'));
 
 test('the version is a plain three-part number', () => {
   assert.match(VERSION, /^\d+\.\d+\.\d+$/, `"${VERSION}" is not a usable version`);
@@ -25,6 +29,11 @@ test('the version is a plain three-part number', () => {
 test('package.json agrees with the version the game reports', () => {
   assert.equal(pkg.version, VERSION,
     `package.json says ${pkg.version} but the game reports ${VERSION}`);
+});
+
+test('version.json publishes the version the game reports', () => {
+  assert.equal(manifest.version, VERSION,
+    `version.json says ${manifest.version} but the game reports ${VERSION}`);
 });
 
 test('a new city is stamped with the version that made it', () => {

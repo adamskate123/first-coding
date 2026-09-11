@@ -106,6 +106,24 @@ export class UI {
     }
   }
 
+  /**
+   * Say that a new version has been deployed.
+   *
+   * A banner rather than a toast: a notice that disappears after three seconds
+   * is no use to someone who was looking at the map when it appeared, and this
+   * one has a button on it.
+   */
+  showUpdate(version) {
+    if (!this.updateBanner) return;
+    const label = document.getElementById('update-text');
+    if (label) label.textContent = version ? `Version ${version} is ready.` : 'A new version is ready.';
+    this.updateBanner.classList.remove('hidden');
+  }
+
+  hideUpdate() {
+    if (this.updateBanner) this.updateBanner.classList.add('hidden');
+  }
+
   /** Flip the traffic on or off, keeping the checkbox and the key in step. */
   toggleVehicles() {
     const on = !this.game.renderer.showVehicles;
@@ -138,6 +156,9 @@ export class UI {
     this.carsToggle = document.getElementById('toggle-cars');
     this.carsToggle.checked = this.game.renderer.showVehicles;
     this.carsToggle.addEventListener('change', (e) => this.game.setVehiclesVisible(e.target.checked));
+    this.updateBanner = document.getElementById('update-banner');
+    document.getElementById('update-reload').addEventListener('click', () => this.game.applyUpdate());
+    document.getElementById('update-later').addEventListener('click', () => this.hideUpdate());
     document.getElementById('btn-budget').addEventListener('click', () => this.showBudget());
     document.getElementById('btn-save').addEventListener('click', () => this.game.save());
     document.getElementById('btn-load').addEventListener('click', () => {
