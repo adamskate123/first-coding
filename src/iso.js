@@ -95,19 +95,10 @@ export class Camera {
  * corners around it average out, so it is picked that way too.
  */
 export function tileQuad(world, x, y) {
+  if (world.terrain[world.idx(x, y)] === T.WATER) return flatQuad(x, y, SEA_LEVEL);
+
   const p = tileToWorld(x, y, 0);
   const w2 = TILE_W / 2;
-
-  if (world.terrain[world.idx(x, y)] === T.WATER) {
-    const lift = SEA_LEVEL * ELEV_STEP;
-    return [
-      { x: p.x, y: p.y - lift },
-      { x: p.x + w2, y: p.y + TILE_H / 2 - lift },
-      { x: p.x, y: p.y + TILE_H - lift },
-      { x: p.x - w2, y: p.y + TILE_H / 2 - lift },
-    ];
-  }
-
   const stride = world.size + 1;
   const c = world.cornerHeights();
   return [
@@ -115,6 +106,22 @@ export function tileQuad(world, x, y) {
     { x: p.x + w2, y: p.y + TILE_H / 2 - c[y * stride + x + 1] * ELEV_STEP },
     { x: p.x, y: p.y + TILE_H - c[(y + 1) * stride + x + 1] * ELEV_STEP },
     { x: p.x - w2, y: p.y + TILE_H / 2 - c[(y + 1) * stride + x] * ELEV_STEP },
+  ];
+}
+
+/**
+ * A level tile surface at a fixed height, in the same four-corner form as
+ * tileQuad. Water uses it, and so does a bridge deck, which is a flat slab
+ * lifted clear of the water rather than something following the ground.
+ */
+export function flatQuad(x, y, height) {
+  const p = tileToWorld(x, y, height);
+  const w2 = TILE_W / 2;
+  return [
+    { x: p.x, y: p.y },
+    { x: p.x + w2, y: p.y + TILE_H / 2 },
+    { x: p.x, y: p.y + TILE_H },
+    { x: p.x - w2, y: p.y + TILE_H / 2 },
   ];
 }
 

@@ -11,7 +11,7 @@
  */
 
 import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, BUILDINGS, SEA_LEVEL, BRIDGE_LIFT } from '../config.js';
-import { tileToWorld, tileQuad } from '../iso.js';
+import { tileToWorld, tileQuad, flatQuad } from '../iso.js';
 import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, LOT, heatColor, shade } from './palette.js';
 import { zoneSprite, buildingSprite, treeSprite, VARIANTS } from './sprites.js';
 import { hash2, clamp } from '../util.js';
@@ -311,6 +311,11 @@ export class Renderer {
     const ctx = this.ctx;
     const w = this.world;
     const deck = tileToWorld(x, y, SEA_LEVEL + BRIDGE_LIFT);
+    // The carriageway needs the deck as a four-corner surface, the same form
+    // every other road is drawn on. Handing drawRoad a bare point instead threw
+    // on every frame a bridge was visible, which killed the animation loop and
+    // froze the game outright.
+    const deckQuad = flatQuad(x, y, SEA_LEVEL + BRIDGE_LIFT);
     const lift = BRIDGE_LIFT * ELEV_STEP;
 
     // piers dropping to the waterline
@@ -332,7 +337,7 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
 
-    this.drawRoad(x, y, i, deck);
+    this.drawRoad(x, y, i, deckQuad);
 
     // Railings close off the open sides, so a span reads as a bridge rather
     // than as road that happens to be floating.

@@ -199,18 +199,39 @@ class Game {
 
   // ----------------------------------------------------------- frame loop --
 
+  /**
+   * One animation frame.
+   *
+   * The rescheduling call sits outside the try on purpose. It used to follow
+   * the work directly, so a single throw anywhere in a tick or a draw meant
+   * requestAnimationFrame was never reached again and the game froze solid,
+   * stuck on a half-painted frame. A fault in drawing one tile should cost
+   * that frame, not the session.
+   */
   frame(now) {
-    const interval = SPEED_TICK_MS[this.speed];
-    if (Number.isFinite(interval) && now - this.lastTick >= interval) {
-      this.lastTick = now;
-      this.sim.step();
-      this.renderer.markDirty();
-      // The readouts are cheap, but not free -- refresh a few times a second.
-      if (this.world.tick % 4 === 0) this.ui.refresh();
-      this.autoSave();
+    try {
+      const interval = SPEED_TICK_MS[this.speed];
+      if (Number.isFinite(interval) && now - this.lastTick >= interval) {
+        this.lastTick = now;
+        this.sim.step();
+        this.renderer.markDirty();
+        // The readouts are cheap, but not free -- refresh a few times a second.
+        if (this.world.tick % 4 === 0) this.ui.refresh();
+        this.autoSave();
+      }
+      this.renderer.render();
+    } catch (err) {
+      this.onFrameError(err);
     }
-    this.renderer.render();
     requestAnimationFrame((t) => this.frame(t));
+  }
+
+  /** Report a frame that went wrong, once, and carry on. */
+  onFrameError(err) {
+    this.frameErrors = (this.frameErrors || 0) + 1;
+    if (this.frameErrors > 1) return;      // don't flood the console every frame
+    console.error('Recovered from an error during the game loop:', err);
+    this.toast('Something went wrong drawing the city. The game is still running.');
   }
 
   resize() {
