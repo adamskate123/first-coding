@@ -51,6 +51,7 @@ const BUILD_EVERYTHING = `
   g.world = new World(64, 2468);
   g.sim = new Simulation(g.world);
   g.renderer.world = g.world;
+  g.vehicles.reset(g.world);
   const w = g.world;
   w.funds = 5000000;
   g.setSpeed(0);
@@ -156,6 +157,50 @@ async function main() {
     ok(`renders the ${overlay} overlay`);
   }
   await page.evaluate(() => { window.game.renderer.overlay = 'none'; });
+
+  // Traffic has to populate from the traffic field, move, and be drawn on both
+  // surfaces a road can take -- the ground and a bridge deck. It is also the
+  // one thing that repaints on its own, so a fault in it would otherwise show
+  // up as the whole game freezing.
+  const cars = await page.evaluate(async () => {
+    const g = window.game;
+    const w = g.world;
+    for (let i = 0; i < w.road.length; i++) if (w.road[i]) w.traffic[i] = 140;
+    w.tick++;
+    g.setSpeed(2);
+    const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+    await settle(800);
+
+    const snapshot = () => g.vehicles.list
+      .map((v) => `${v.i}:${v.t.toFixed(4)}`).sort().join('|');
+    const before = snapshot();
+    const onDeck = g.vehicles.list.filter((v) => w.deckHeight[v.i] > 0).length;
+    await settle(400);
+    const moved = snapshot() !== before;
+
+    // Both drawing paths: the plain roof blob when zoomed out, the full body
+    // with glazing when zoomed in.
+    for (const z of [0.4, 1, 1.6, 2.4]) {
+      g.camera.zoom = z;
+      g.renderer.markDirty();
+      g.renderer.render();
+    }
+    const drawn = g.renderer.carsByTile.size;
+
+    g.ui.toggleVehicles();
+    g.renderer.render();
+    const hidden = g.renderer.carsByTile.size;
+    g.ui.toggleVehicles();
+
+    g.setSpeed(0);
+    return { count: g.vehicles.list.length, moved, onDeck, drawn, hidden };
+  });
+  if (!cars.count) fail('no cars appeared on roads carrying traffic');
+  else if (!cars.moved) fail(`${cars.count} cars appeared but none of them moved`);
+  else if (!cars.onDeck) fail('no car ever drove onto a bridge deck');
+  else if (!cars.drawn) fail('cars were simulated but never handed to the renderer');
+  else if (cars.hidden) fail('cars were still drawn after being switched off');
+  else ok(`${cars.count} cars driving, ${cars.onDeck} on bridges, over ${cars.drawn} tiles`);
 
   // Drive every tool across the map, including over water, so previews draw.
   const tools = await page.evaluate(() => Array.from(

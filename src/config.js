@@ -9,7 +9,7 @@
  * Minor versions track feature releases (bridges, wealth tiers, eras, relief);
  * the patch digit is for fixes and tuning.
  */
-export const VERSION = '0.8.0';
+export const VERSION = '0.9.0';
 
 /**
  * Central tuning constants.
@@ -33,6 +33,31 @@ export const MAX_ELEVATION = 30;     // ceiling on generated height
 export const TICKS_PER_MONTH = 60;
 export const SPEED_LABELS = ['Paused', 'Slow', 'Normal', 'Fast'];
 export const SPEED_TICK_MS = [Infinity, 420, 150, 45];
+
+/**
+ * Traffic animation.
+ *
+ * The city only repaints when something changes, so moving cars are the one
+ * thing that asks for a steady frame rate. Thirty a second is enough for
+ * traffic to read as motion and leaves the rest of the budget alone; the fleet
+ * stands still while the game is paused, which costs nothing at all.
+ *
+ * Cars also hurry a little when the clock does, so a fast-forwarded city does
+ * not look like a still life -- but nowhere near the full ratio, which would be
+ * a blur.
+ */
+export const VEHICLE_FRAME_MS = 1000 / 30;
+export const VEHICLE_RATE = [0, 0.85, 1, 1.4];
+
+/**
+ * The largest share of wall-clock time the animation may spend repainting.
+ *
+ * A sprawling city viewed at full zoom costs several times what a small one
+ * does to draw, and thirty frames a second of it would eat the machine. So the
+ * traffic gives ground: it keeps its frame rate where the scene is cheap, and
+ * slows down rather than starving input and simulation where it is not.
+ */
+export const VEHICLE_BUDGET_SHARE = 0.4;
 export const START_YEAR = 1900;
 export const START_FUNDS = 60000;
 

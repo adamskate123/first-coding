@@ -32,6 +32,27 @@ export const ROAD_COLORS = {
 };
 
 /**
+ * Paintwork for the traffic.
+ *
+ * Muted and a little dusty, so a street full of cars reads as texture rather
+ * than as confetti; a few brighter ones keep it from looking like a car park.
+ * Each tone is shaded once at load, because a busy city repaints several
+ * hundred of these thirty times a second and re-parsing a colour string per car
+ * per frame is not free.
+ */
+const CAR_PAINT = [
+  '#cfd1cc', '#b9bcb8', '#7c8189', '#4a5568', '#2e3947',
+  '#7d3a33', '#a8503c', '#3f5f47', '#8b7a3e', '#5b5f63',
+  '#9aa0a3', '#33414d', '#6d5a52', '#c2b49a',
+];
+const TRUCK_PAINT = ['#d8d8d2', '#8f958f', '#41586e', '#7a4a3c'];
+const BUS_PAINT = ['#d9a53a', '#c26a35', '#48677f'];
+
+/** kind -> tones, each pre-shaded into a roof colour and a side colour. */
+export const VEHICLE_TONES = [CAR_PAINT, TRUCK_PAINT, BUS_PAINT].map((family) =>
+  family.map((c) => ({ roof: c, side: shade(c, 0.68), glass: shade(c, 0.45) })));
+
+/**
  * Building colour families, keyed by use and wealth tier.
  *
  * Wealth carries the colour, not density. A cheap tower block and a cheap house
@@ -203,6 +224,8 @@ export function applyEra(way, era) {
   };
 }
 
+function clamp255(v) { return Math.max(0, Math.min(255, Math.round(v))); }
+
 /** Shift a colour towards white (t > 1) or black (t < 1). Composable. */
 export function shade(color, t) {
   let [r, g, b] = parseColor(color);
@@ -210,9 +233,12 @@ export function shade(color, t) {
     const k = Math.min(1, t - 1);
     r += (255 - r) * k; g += (255 - g) * k; b += (255 - b) * k;
   } else {
-    r *= t; g *= t; b *= t;
+    r *= Math.max(0, t); g *= Math.max(0, t); b *= Math.max(0, t);
   }
-  return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+  // A channel out of range makes the whole string invalid, and a canvas
+  // rejects an invalid fillStyle in silence -- the shape simply comes out in
+  // whatever colour was set last, which is a maddening thing to track down.
+  return `rgb(${clamp255(r)},${clamp255(g)},${clamp255(b)})`;
 }
 
 /** Blue -> green -> yellow -> red ramp for the data overlays. */

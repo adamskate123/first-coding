@@ -106,6 +106,13 @@ export class UI {
     }
   }
 
+  /** Flip the traffic on or off, keeping the checkbox and the key in step. */
+  toggleVehicles() {
+    const on = !this.game.renderer.showVehicles;
+    this.game.setVehiclesVisible(on);
+    if (this.carsToggle) this.carsToggle.checked = on;
+  }
+
   setActiveTool(tool) {
     for (const b of this.toolButtons) b.classList.toggle('active', b.dataset.tool === tool);
   }
@@ -128,6 +135,9 @@ export class UI {
       this.game.renderer.overlay = e.target.value;
       this.game.renderer.markDirty();
     });
+    this.carsToggle = document.getElementById('toggle-cars');
+    this.carsToggle.checked = this.game.renderer.showVehicles;
+    this.carsToggle.addEventListener('change', (e) => this.game.setVehiclesVisible(e.target.checked));
     document.getElementById('btn-budget').addEventListener('click', () => this.showBudget());
     document.getElementById('btn-save').addEventListener('click', () => this.game.save());
     document.getElementById('btn-load').addEventListener('click', () => {

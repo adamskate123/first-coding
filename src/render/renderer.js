@@ -11,9 +11,10 @@
  */
 
 import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, ROAD_INFO, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE } from '../config.js';
-import { tileToWorld, tileQuad, flatQuad } from '../iso.js';
-import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, LOT, heatColor, shade, mix } from './palette.js';
+import { tileToWorld, tileQuad, flatQuad, quadPoint } from '../iso.js';
+import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, LOT, VEHICLE_TONES, heatColor, shade, mix } from './palette.js';
 import { zoneSprite, buildingSprite, treeSprite, VARIANTS } from './sprites.js';
+import { vehicleLocal, KIND_SIZE } from '../sim/vehicles.js';
 import { hash2, clamp } from '../util.js';
 
 /** Neighbour offsets, indexed the same way as frontage() and quadEdgeMid(). */
@@ -48,6 +49,9 @@ export function quadInset(q, scale) {
   }));
 }
 
+/** A clock that works in a browser and in a bare node test alike. */
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
 /** Largest building footprint in the catalogue, used to size the draw margin. */
 const MAX_SPAN = Math.max(...Object.values(BUILDINGS).map((b) => b.span));
 
@@ -70,6 +74,10 @@ export class Renderer {
     this.previewValid = true;
     this.dirty = true;
     this.showGrid = false;
+    this.showVehicles = true;
+    this.vehicles = null;      // a VehicleField, once the game has one
+    this.carsByTile = new Map();
+    this.renderCost = 0;       // rolling cost of a full repaint, in ms
   }
 
   markDirty() { this.dirty = true; }
@@ -77,6 +85,7 @@ export class Renderer {
   render() {
     if (!this.dirty) return;
     this.dirty = false;
+    const started = now();
 
     const ctx = this.ctx;
     const { width, height } = this.canvas;
@@ -97,6 +106,7 @@ export class Renderer {
 
     const w = this.world;
     const s = w.size;
+    this.bucketVehicles();
 
     // Diagonal sweep: every tile on diagonal d satisfies x + y === d.
     for (let d = 0; d <= 2 * (s - 1); d++) {
@@ -110,6 +120,9 @@ export class Renderer {
 
     if (this.overlay !== 'none') this.drawOverlay();
     this.drawCursor();
+
+    // Eased, so one slow frame does not decide the animation's pace.
+    this.renderCost = this.renderCost * 0.8 + (now() - started) * 0.2;
   }
 
   /** Screen-space rejection for a tile, before any drawing work. */
@@ -138,8 +151,14 @@ export class Renderer {
 
     // --- what the player put there ----------------------------------------
     if (w.road[i]) {
-      if (w.deckHeight[i] > 0) this.drawBridge(x, y, i, terrain);
+      // A bridge lays its own carriageway on the deck, and hands that deck back
+      // so anything driving over it rides the span rather than the water.
+      let surface = quad;
+      if (w.deckHeight[i] > 0) surface = this.drawBridge(x, y, i, terrain);
       else this.drawRoad(x, y, i, quad);
+      // Cars are painted with their own tile, which leaves the painter's sweep
+      // in charge of what hides what: a car behind a tower stays behind it.
+      if (this.carsByTile.size) this.drawVehicles(i, surface);
     }
 
     const zone = w.zone[i];
@@ -378,6 +397,116 @@ export class Renderer {
       ctx.moveTo(b.x, b.y - RAIL_H); ctx.lineTo(b.x, b.y);
     }
     ctx.stroke();
+
+    return deckQuad;
+  }
+
+  // ------------------------------------------------------------- traffic --
+
+  /**
+   * Sort the fleet by tile, once per frame.
+   *
+   * The sweep paints one tile at a time and needs the cars on that tile there
+   * and then; scanning the whole list per tile would be quadratic on a busy
+   * map. Buckets are reused between frames so a fleet of several hundred cars
+   * at thirty frames a second does not hand the collector a few thousand dead
+   * arrays a second.
+   */
+  bucketVehicles() {
+    for (const bucket of this.carsByTile.values()) bucket.length = 0;
+    if (!this.vehicles || !this.showVehicles) { this.carsByTile.clear(); return; }
+
+    for (const v of this.vehicles.list) {
+      let bucket = this.carsByTile.get(v.i);
+      if (!bucket) this.carsByTile.set(v.i, bucket = []);
+      bucket.push(v);
+    }
+  }
+
+  drawVehicles(i, quad) {
+    const bucket = this.carsByTile.get(i);
+    if (!bucket || !bucket.length) return;
+    for (const v of bucket) this.drawVehicle(v, quad);
+  }
+
+  /**
+   * One car: a small box on the carriageway, oriented along its path.
+   *
+   * Body and width axes are unit vectors in *tile* space before they are
+   * projected, so a car heading down-right is foreshortened exactly as the tile
+   * beneath it is -- take the projection first and normalise after, and every
+   * car comes out the same length on screen whichever way it faces, which reads
+   * as wrong immediately even though it is hard to name.
+   */
+  drawVehicle(v, quad) {
+    const ctx = this.ctx;
+    const loc = vehicleLocal(v);
+    const p = quadPoint(quad, loc.x, loc.y);
+    if (!this.visible(p.x, p.y)) return;
+
+    const size = KIND_SIZE[v.kind] || KIND_SIZE[0];
+    const tone = VEHICLE_TONES[v.kind][v.tone % VEHICLE_TONES[v.kind].length];
+
+    const mag = Math.hypot(loc.dx, loc.dy) || 1;
+    const tx = loc.dx / mag, ty = loc.dy / mag;      // heading, in tile space
+    const rx = -ty, ry = tx;                         // its right-hand side
+
+    const ax = (tx - ty) * (TILE_W / 2) * size.length / 2;
+    const ay = (tx + ty) * (TILE_H / 2) * size.length / 2;
+    const bx = (rx - ry) * (TILE_W / 2) * size.width / 2;
+    const by = (rx + ry) * (TILE_H / 2) * size.width / 2;
+
+    const g = [
+      { x: p.x + ax + bx, y: p.y + ay + by },
+      { x: p.x + ax - bx, y: p.y + ay - by },
+      { x: p.x - ax - bx, y: p.y - ay - by },
+      { x: p.x - ax + bx, y: p.y - ay + by },
+    ];
+
+    // Zoomed out a car is a couple of pixels across, and the box, its shadow
+    // and its sides would all land on the same ones. Draw the roof alone.
+    if (this.camera.zoom < 0.6) {
+      ctx.fillStyle = tone.roof;
+      this.quadPath(g);
+      ctx.fill();
+      return;
+    }
+
+    // A shadow under the body stops it floating off the tarmac.
+    ctx.fillStyle = 'rgba(20, 18, 14, 0.30)';
+    this.quadPath(g.map((c) => ({ x: c.x + 1.5, y: c.y + 1 })));
+    ctx.fill();
+
+    const h = size.height;
+    const roof = g.map((c) => ({ x: c.x, y: c.y - h }));
+
+    // Only the flanks facing the viewer are drawn: the far ones are inside the
+    // silhouette, so painting them would only cost time.
+    ctx.fillStyle = tone.side;
+    for (let k = 0; k < 4; k++) {
+      const a = g[k], b = g[(k + 1) % 4];
+      if ((a.y + b.y) / 2 <= p.y) continue;
+      this.quadPath([a, b, roof[(k + 1) % 4], roof[k]]);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = tone.roof;
+    this.quadPath(roof);
+    ctx.fill();
+
+    // A darker band across the middle reads as glazing at this size, and gives
+    // the eye something to track as the car moves.
+    if (this.camera.zoom >= 1.1) {
+      const inset = 0.34;
+      ctx.fillStyle = tone.glass;
+      this.quadPath([
+        { x: p.x + ax * inset + bx, y: p.y + ay * inset + by - h },
+        { x: p.x + ax * inset - bx, y: p.y + ay * inset - by - h },
+        { x: p.x - ax * inset - bx, y: p.y - ay * inset - by - h },
+        { x: p.x - ax * inset + bx, y: p.y - ay * inset + by - h },
+      ]);
+      ctx.fill();
+    }
   }
 
   drawPowerLine(x, y, i, p) {

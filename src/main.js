@@ -7,10 +7,11 @@
  * fast-forwarded one never renders more often than it simulates.
  */
 
-import { MAP_SIZE, SPEED_TICK_MS, AUTOSAVE_INTERVAL_MS } from './config.js';
+import { MAP_SIZE, SPEED_TICK_MS, AUTOSAVE_INTERVAL_MS, VEHICLE_RATE } from './config.js';
 import { World } from './world.js';
 import { Camera, pickTile } from './iso.js';
 import { Simulation } from './sim/index.js';
+import { VehicleField, vehicleInterval } from './sim/vehicles.js';
 import { Renderer } from './render/renderer.js';
 import { ToolController, TOOL } from './tools.js';
 import { UI } from './ui/index.js';
@@ -26,6 +27,7 @@ class Game {
 
     this.lastSaveAt = 0;
     this.savedLabel = null;
+    this.lastVehicleAt = 0;
 
     // Resume the city you were playing. A reload that silently threw it away
     // and generated a new map is the whole reason this exists.
@@ -44,6 +46,8 @@ class Game {
     }
 
     this.renderer = new Renderer(canvas, this.world, this.camera);
+    this.vehicles = new VehicleField(this.world);
+    this.renderer.vehicles = this.vehicles;
     this.tools = new ToolController(this);
     this.ui = new UI(this);
 
@@ -84,6 +88,7 @@ class Game {
     this.sim = new Simulation(world);
     this.sim.topologyDirty = true;
     this.renderer.world = world;
+    this.vehicles.reset(world);
     this.tools.cancel();
     this.ui.selected = null;
     this.renderer.markDirty();
@@ -219,11 +224,36 @@ class Game {
         if (this.world.tick % 4 === 0) this.ui.refresh();
         this.autoSave();
       }
+      if (Number.isFinite(interval)) this.driveVehicles(now);
       this.renderer.render();
     } catch (err) {
       this.onFrameError(err);
     }
     requestAnimationFrame((t) => this.frame(t));
+  }
+
+  /**
+   * Move the traffic along, at its own rate rather than the frame's.
+   *
+   * This is the only thing in the game that repaints without the city having
+   * changed, so it is kept on a leash: a fixed step, skipped entirely when the
+   * clock is paused or the cars are switched off, and it asks for a redraw only
+   * while there is actually something on the road.
+   */
+  driveVehicles(now) {
+    if (!this.renderer.showVehicles) return;
+    const elapsed = now - this.lastVehicleAt;
+    if (elapsed < vehicleInterval(this.renderer.renderCost)) return;
+    this.lastVehicleAt = now;
+    this.vehicles.rate = VEHICLE_RATE[this.speed] ?? 1;
+    if (this.vehicles.update(elapsed)) this.renderer.markDirty();
+  }
+
+  /** Show or hide the traffic, and repaint either way. */
+  setVehiclesVisible(on) {
+    this.renderer.showVehicles = on;
+    this.lastVehicleAt = 0;
+    this.renderer.markDirty();
   }
 
   /** Report a frame that went wrong, once, and carry on. */
@@ -333,6 +363,7 @@ class Game {
         case 'Digit3': this.setSpeed(3); break;
         case 'KeyB': this.tools.select(TOOL.BULLDOZE); this.ui.setActiveTool(TOOL.BULLDOZE); break;
         case 'KeyG': this.renderer.showGrid = !this.renderer.showGrid; this.renderer.markDirty(); break;
+        case 'KeyV': this.ui.toggleVehicles(); break;
         default: break;
       }
       const pan = 60 / this.camera.zoom;

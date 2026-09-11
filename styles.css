@@ -284,6 +284,17 @@ button.active { color: var(--accent); }
   text-transform: uppercase;
   color: var(--ink-dim);
 }
+#overlaybar .switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+#overlaybar .switch input {
+  accent-color: #b9a96b;
+  margin: 0;
+}
 select {
   font-family: var(--font);
   font-size: 11px;
