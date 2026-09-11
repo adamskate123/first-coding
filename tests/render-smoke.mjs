@@ -225,12 +225,75 @@ async function main() {
   if (alive.now <= alive.t0) fail(`the animation loop stopped (tick stuck at ${alive.t0})`);
   else ok(`the loop is alive (tick ${alive.t0} -> ${alive.now})`);
 
-  // And a reload must resume what was built.
-  await page.reload({ waitUntil: 'networkidle' });
+  // The update notice: the real check against the real manifest, standing in a
+  // version that cannot be the deployed one.
+  const notice = await page.evaluate(async () => {
+    const { UpdateWatch } = await import('/src/update.js');
+    const watch = new UpdateWatch({
+      version: '0.0.0-not-deployed',
+      onReady: (v) => window.game.ui.showUpdate(v),
+    });
+    const fired = await watch.check();
+    watch.stop();
+    const banner = document.getElementById('update-banner');
+    const shown = !banner.classList.contains('hidden');
+    const text = document.getElementById('update-text').textContent;
+    document.getElementById('update-later').click();
+    return { fired, shown, text, dismissed: banner.classList.contains('hidden') };
+  });
+  if (!notice.fired) fail('the update check did not notice a different deployed version');
+  else if (!notice.shown) fail('an update was found but no banner appeared');
+  else if (!/\d+\.\d+\.\d+/.test(notice.text)) fail(`the banner does not name the version: "${notice.text}"`);
+  else if (!notice.dismissed) fail('the banner cannot be dismissed');
+  else ok(`the update notice appears and dismisses ("${notice.text}")`);
+
+  // A check that finds the version it is already running must stay quiet.
+  const quiet = await page.evaluate(async () => {
+    const { UpdateWatch } = await import('/src/update.js');
+    const { VERSION } = await import('/src/config.js');
+    const watch = new UpdateWatch({ version: VERSION, onReady: () => window.game.ui.showUpdate('wrong') });
+    const fired = await watch.check();
+    watch.stop();
+    return { fired, shown: !document.getElementById('update-banner').classList.contains('hidden') };
+  });
+  if (quiet.fired || quiet.shown) fail('the update banner fired on the version already running');
+  else ok('no banner when the running version is the deployed one');
+
+  // Taking the update saves the city first, then reloads onto the new build --
+  // so this doubles as the check that a reload resumes what was built.
+  await page.evaluate(() => window.game.ui.showUpdate('9.9.9'));
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'networkidle' }),
+    page.click('#update-reload'),
+  ]);
   await page.waitForTimeout(700);
   const resumed = await page.evaluate(() => window.game.world.buildings.length);
   if (resumed !== built.buildings) fail(`reload lost the city (${resumed} of ${built.buildings} buildings)`);
-  else ok('a reload resumes the city');
+  else ok('taking the update saves the city and reloads it');
+
+  // The service worker is what makes that reload land on the new build rather
+  // than on whatever the browser had cached, so it has to be in charge.
+  const worker = await page.evaluate(async () => {
+    const reg = await navigator.serviceWorker.getRegistration();
+    return { controlled: !!navigator.serviceWorker.controller, script: reg && reg.active && reg.active.scriptURL };
+  });
+  if (!worker.controlled) fail('the service worker is not controlling the page');
+  else if (!/sw\.js\?v=\d+\.\d+\.\d+/.test(worker.script || '')) fail(`the worker is registered without a version: ${worker.script}`);
+  else ok('the service worker controls the page, versioned by release');
+
+  // And with the network gone it should still deal the game out of its cache.
+  await page.context().setOffline(true);
+  let offlineBoot = null;
+  try {
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForTimeout(900);
+    offlineBoot = await page.evaluate(() => !!(window.game && window.game.world));
+  } catch (err) {
+    offlineBoot = `threw: ${err.message.split('\n')[0]}`;
+  }
+  await page.context().setOffline(false);
+  if (offlineBoot !== true) fail(`the game does not boot offline (${offlineBoot})`);
+  else ok('the game still boots with the network gone');
 
   if (errors.length) {
     fail(`${errors.length} page error(s):`);

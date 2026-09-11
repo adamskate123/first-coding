@@ -344,6 +344,29 @@ select {
 }
 #toast.show { opacity: 1; }
 
+/* ----------------------------------------------------------- update notice */
+
+#update-banner {
+  position: absolute;
+  left: 50%; top: 46px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(38, 36, 32, 0.97);
+  border: 1px solid var(--accent);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+  color: var(--ink);
+  font-size: 11px;
+  z-index: 45;
+}
+#update-banner.hidden { display: none; }
+#update-banner .chip.quiet {
+  color: var(--ink-dim);
+  border-color: var(--edge-dark);
+}
+
 /* ------------------------------------------------------------------ modal - */
 
 #modal {
