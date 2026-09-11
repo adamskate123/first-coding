@@ -8,7 +8,7 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
-Current version **0.11.0**, shown in the title bar. `VERSION` in
+Current version **0.12.0**, shown in the title bar. `VERSION` in
 `src/config.js` is the single source of truth — `package.json` carries the same
 number for tooling and a test asserts the two agree. Minor versions track
 feature releases; saves record the version that wrote them, though
@@ -120,8 +120,9 @@ having changed, so it is held to a share of the clock: thirty frames a second
 where the scene is cheap to draw, slower where it is not, and nothing at all
 while the game is paused.
 
-**Land value** is the number the market consults. Amenity raises it
-(waterfront, trees, parks, schools, safety); nuisance lowers it (pollution,
+**Land value** feeds back on itself, which is what lets a city grow a centre.
+Amenity raises it (waterfront, trees, parks, schools, safety); nuisance lowers
+it (pollution,
 crime, gridlock, heavy industry next door). Each contribution is a field that
 spreads spatially, then the whole thing is blurred so values grade across a
 neighbourhood instead of snapping tile by tile.
@@ -166,6 +167,32 @@ substantial banks rather than an archipelago, and dry ground at the centre
 where the camera starts. Roughly half of all seeds produce a river that
 genuinely splits the map — which is the point, now that you can bridge it.
 `tests/terrain.test.js` asserts those properties across many seeds.
+
+**Agglomeration.** Development raises the value of the land around it, which
+supports denser development, which raises it further. Without that loop every
+district shared one ceiling: measured across a built-out 96x96 city, the
+highest land value anywhere was 94, while dense residential needs 140 for its
+third level and 180 for its fourth — so the towers existed in the art and
+could never be built. The lift is spatial (a district earns it, not a lot),
+saturating (a core plateaus rather than running away) and sticky (a
+neighbourhood's standing is a memory of what has stood there). All three
+matter: recomputed from scratch each pass, the loop swung one city between
+9.8k and 17.8k people every few years.
+
+A settled market also has demand at zero forever, which capped every city short
+of the top whatever its land was worth. So a lot whose land clears its next
+threshold by a clear margin redevelops even in a flat market — the way a
+valuable centre keeps building upwards while the suburbs around it stay put —
+but slowly, because redevelopment adds the capacity that satisfies the demand
+that permits it, and a lagged loop at full gain oscillates.
+
+**Grids shed load rather than failing.** A network used to be energised or not,
+so one percent short blacked out everything on it; since losing power empties a
+lot at once, an entire city would collapse, crash its own demand, come back and
+rebuild, forever. A short network now serves what it can in a fixed order, so
+the same districts stay dark — something you can see in the power view and fix,
+where a city-wide strobe is only bewildering. Under-supplied cities now settle
+at the ceiling their generation allows.
 
 **Eras.** A lot records the year it was first built out and draws in that
 period's style for as long as it stands — Edwardian, post-war, modern,
@@ -223,6 +250,23 @@ The recipe is also where coherence is enforced: setbacks never appear on
 two-storey buildings, pitched roofs never land on towers, and height stays
 within a jitter band of the level baseline so a building's size still reads as
 its development stage.
+
+**Roofs carry the view.** An isometric camera looking down at a city sees
+mostly roofs, so they get their own material rather than a shade of the wall:
+tile and slate on pitches, tar, gravel, lead, copper and planted roofs on
+flats, chosen by period and budget. Pitched roofs draw their hips, ridge and
+eaves — four flat triangles meeting at a point read as a pyramid of paint —
+and flat ones get a parapet, a recessed deck, a stair housing and plant. This
+was measured rather than guessed: changing every wall in a dense city moved 41%
+of the frame's pixels by an average of 3%, because the roofs were untouched;
+changing roofs and massing too moved 84% of them by 8%.
+
+**Massing.** A building's silhouette is the first thing read at any distance,
+and the vocabulary used to collapse: commercial high at level 1 produced
+sixteen identical boxes, because its forms were all stacked ones and every one
+of them was too short to stack. Stacked forms now fall back to forms that work
+at low rise — a stepped pair, a tee, an ell — rather than to a plain block, and
+the height jitter is wide enough that a row of the same zone has a profile.
 
 **Facades are a grammar, not a grid.** A wall used to be a lattice: pick a
 column count and a row count and stamp identical rectangles across the whole

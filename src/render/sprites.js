@@ -24,7 +24,7 @@
  */
 
 import { TILE_W, TILE_H, BUILDINGS, ERAS } from '../config.js';
-import { buildingPalette, applyEra, TREE_COLORS, FACE, shade } from './palette.js';
+import { buildingPalette, applyEra, roofColor, TREE_COLORS, FACE, shade } from './palette.js';
 import { facadeStyle, facadePlan, EL } from './facade.js';
 import { hash2, makeRng, clamp, createLruCache } from '../util.js';
 
@@ -74,39 +74,39 @@ const ZONE_HEIGHTS = {
 const STYLES = {
   R_LOW: {
     roofs: ['hip', 'gable', 'gable', 'hip'],
-    massing: ['single', 'single', 'twin', 'ell'],
+    massing: ['single', 'twin', 'ell', 'stepped', 'tee', 'single'],
     windows: ['grid', 'grid', 'sparse'],
-    footprint: [0.66, 0.82], jitter: 0.24, chimney: 0.75,
+    footprint: [0.66, 0.82], jitter: 0.30, chimney: 0.75,
   },
   R_HIGH: {
     roofs: ['flat', 'flat', 'flat', 'gable'],
-    massing: ['single', 'single', 'setback', 'ell'],
+    massing: ['single', 'setback', 'ell', 'stepped', 'twin', 'tee'],
     windows: ['grid', 'grid', 'columns'],
-    footprint: [0.82, 0.95], jitter: 0.20, chimney: 0.15,
+    footprint: [0.82, 0.95], jitter: 0.32, chimney: 0.15,
   },
   C_LOW: {
     roofs: ['flat', 'flat', 'gable'],
-    massing: ['single', 'single', 'ell'],
+    massing: ['single', 'ell', 'tee', 'stepped', 'single'],
     windows: ['ribbon', 'ribbon', 'grid'],
-    footprint: [0.60, 0.74], jitter: 0.18, chimney: 0, awning: 0.65,
+    footprint: [0.60, 0.74], jitter: 0.26, chimney: 0, awning: 0.65,
   },
   C_HIGH: {
     roofs: ['flat'],
-    massing: ['single', 'setback', 'podium', 'single'],
+    massing: ['single', 'setback', 'podium', 'stepped', 'tee', 'ell'],
     windows: ['ribbon', 'columns', 'grid'],
-    footprint: [0.84, 0.96], jitter: 0.22, chimney: 0, awning: 0.3,
+    footprint: [0.84, 0.96], jitter: 0.34, chimney: 0, awning: 0.3,
   },
   I_LIGHT: {
     roofs: ['flat', 'flat', 'gable'],
-    massing: ['single', 'single', 'ell'],
+    massing: ['single', 'ell', 'tee', 'stepped'],
     windows: ['sparse'],
-    footprint: [0.64, 0.78], jitter: 0.16, chimney: 0,
+    footprint: [0.64, 0.78], jitter: 0.24, chimney: 0,
   },
   I_HEAVY: {
     roofs: ['flat'],
-    massing: ['single', 'single', 'twin', 'ell'],
+    massing: ['single', 'twin', 'ell', 'stepped', 'tee'],
     windows: ['sparse'],
-    footprint: [0.84, 0.96], jitter: 0.16, chimney: 0,
+    footprint: [0.84, 0.96], jitter: 0.26, chimney: 0,
   },
 };
 
@@ -126,6 +126,9 @@ const WEALTH_STYLE = {
 
 /** Stacked forms need enough height to be legible as stacked. */
 const STACK_MIN_HEIGHT = 44;
+
+/** What a stacked form becomes when the building is too short for it. */
+const LOW_RISE_FORMS = ['stepped', 'tee', 'ell', 'twin'];
 
 /**
  * Derive a lot's design from its variant number.
@@ -170,9 +173,13 @@ export function buildingRecipe(zoneKey, level, variant, wealth = 1, era = 1) {
     const fancier = style.massing.filter((m) => m !== 'single');
     if (fancier.length) massing = fancier[Math.floor(rng() * fancier.length)];
   }
-  // A setback or podium on a two-storey building just looks like a mistake.
+  // A setback or podium on a two-storey building just looks like a mistake --
+  // but falling back to a plain block was worse. Measured, commercial high at
+  // level 1 produced sixteen identical boxes, because its whole vocabulary was
+  // stacked forms and every one of them was too short to stack. Fall back to a
+  // form that works at low rise instead.
   if ((massing === 'setback' || massing === 'podium') && height < STACK_MIN_HEIGHT) {
-    massing = 'single';
+    massing = LOW_RISE_FORMS[Math.floor(rng() * LOW_RISE_FORMS.length)];
   }
 
   // The period decides pitch, but only among the forms the zone actually uses.
@@ -221,9 +228,30 @@ export function buildingRecipe(zoneKey, level, variant, wealth = 1, era = 1) {
     // How this building's walls are organised. Drawn from the same generator,
     // so it is as much a part of the design as the massing.
     facade: facadeStyle(rng, category, tier, periodIndex),
+    roofMaterial: roofMaterialFor(pitched, tier, periodIndex, rng),
     category,
     seed: hash2(variant, capped * 8 + tier, 0x51ed),
   };
+}
+
+/**
+ * What this building's roof is made of.
+ *
+ * The pitch decides most of it -- you do not tar a gable or tile a flat -- and
+ * the rest follows money and period: lead and copper on the good Edwardian
+ * stock, gravel and tar on everything cheap, a planted roof only on a modern
+ * building that can afford one.
+ */
+function roofMaterialFor(pitched, tier, era, rng) {
+  const r = rng();
+  if (pitched) {
+    if (era <= 1) return r < 0.72 ? 0 : 1;                    // tile, else slate
+    return r < 0.5 ? 1 : r < 0.8 ? 0 : 2;                     // slate, tile, lead
+  }
+  if (tier === 2 && era >= 2 && r < 0.3) return 5;            // roof garden
+  if (tier === 2 && era <= 1 && r < 0.35) return 4;           // copper
+  if (tier === 0) return r < 0.6 ? 3 : 6;                     // tar, gravel
+  return r < 0.45 ? 3 : r < 0.75 ? 6 : 2;                     // tar, gravel, lead
 }
 
 function makeCanvas(w, h) {
@@ -511,6 +539,22 @@ function hipRoof(ctx, ox, oy, span, lift, rise, color) {
   face(top, right, 0.78);
   face(left, bottom, 1.06);
   face(bottom, right, 0.7);
+
+  // The hips themselves. Four flat triangles meeting at a point read as a
+  // pyramid of paint; the arrises are what make it read as a roof.
+  ctx.strokeStyle = shade(color, 1.3);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(left.x, left.y); ctx.lineTo(apex.x, apex.y);
+  ctx.moveTo(bottom.x, bottom.y); ctx.lineTo(apex.x, apex.y);
+  ctx.stroke();
+  ctx.strokeStyle = shade(color, 0.6);
+  ctx.beginPath();
+  ctx.moveTo(top.x, top.y); ctx.lineTo(apex.x, apex.y);
+  ctx.moveTo(right.x, right.y); ctx.lineTo(apex.x, apex.y);
+  // and the eaves, where the roof oversails the wall
+  ctx.moveTo(left.x, left.y); ctx.lineTo(bottom.x, bottom.y); ctx.lineTo(right.x, right.y);
+  ctx.stroke();
 }
 
 /** Gabled roof: two slopes meeting at a ridge, with a triangular end wall. */
@@ -544,18 +588,62 @@ function gableRoof(ctx, ox, oy, span, lift, rise, color, wall) {
   };
   plane(top, right, 0.74);     // far slope
   plane(left, bottom, 1.05);   // near slope, catching the light
+
+  // Ridge and eaves. Without them the two slopes merge into one lozenge.
+  ctx.strokeStyle = shade(color, 1.34);
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(ridgeA.x, ridgeA.y); ctx.lineTo(ridgeB.x, ridgeB.y);
+  ctx.stroke();
+  ctx.strokeStyle = shade(color, 0.58);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(left.x, left.y); ctx.lineTo(bottom.x, bottom.y); ctx.lineTo(right.x, right.y);
+  ctx.stroke();
 }
 
-/** Parapet, stair housings and vents -- what sells a flat roof. */
+/**
+ * Parapet, deck and plant -- what sells a flat roof.
+ *
+ * This is the surface the camera sees most of, and a bare fill of one colour
+ * is why a block of flat-roofed buildings used to read as a grid of tiles
+ * rather than as rooftops. A rim, a recessed deck of a different tone, and
+ * some plant standing on it are the whole difference.
+ */
 function flatRoofDetail(ctx, box, colors, rec) {
   const { ox, oy, span, height } = box;
-  ctx.strokeStyle = shade(colors.roof, 0.72);
-  ctx.lineWidth = 1.5;
+
+  // The parapet rim, then the deck recessed inside it.
+  const deck = span * 0.84;
+  ctx.fillStyle = shade(colors.roof, 1.16);
   rhombus(ctx, ox, oy, span, height);
-  ctx.stroke();
+  ctx.fill();
+  ctx.fillStyle = shade(colors.roof, 0.9);
+  rhombus(ctx, ox, oy + ((span - deck) * TILE_H) / 2, deck, height);
+  ctx.fill();
 
   const w2 = (span * TILE_W) / 2;
   const h2 = (span * TILE_H) / 2;
+
+  // A stair housing, which every flat roof in the world has.
+  if (span > 0.45) {
+    const sx = ox + w2 * 0.28, sy = oy + h2 - height + h2 * 0.1;
+    isoBox(ctx, sx, sy, span * 0.2, 5 + (rec.seed % 4), {
+      wall: shade(colors.roof, 1.05), roof: shade(colors.roof, 0.72),
+    });
+  }
+
+  // Plant: a huddle of small units, the way real roofs carry air handling.
+  const units = 1 + (rec.seed >> 5) % 3;
+  ctx.fillStyle = shade(colors.roof, 0.66);
+  for (let k = 0; k < units; k++) {
+    const hx = hash2(k, rec.seed, 71) / 4294967296 - 0.5;
+    const hy = hash2(k, rec.seed, 83) / 4294967296 - 0.5;
+    if (Math.abs(hx) + Math.abs(hy) > 0.5) continue;
+    const cx = ox + (hx + hy) * w2 * 0.9;
+    const cy = oy + h2 - height + (hx - hy) * h2 * 0.9;
+    ctx.fillRect(cx - 2, cy - 3, 4, 3);
+  }
   for (let k = 0; k < rec.tanks; k++) {
     const hx = hash2(k, rec.seed, 17) / 4294967296;
     const hy = hash2(k, rec.seed, 29) / 4294967296;
@@ -649,6 +737,24 @@ export function massingParts(rec) {
         { u: c, v: c + main * 0.62, s: wing, h: Math.round(h * 0.74), lift: 0, roofed: true },
       ];
     }
+    case 'stepped': {
+      // Two masses side by side at different heights: the cheapest way to put
+      // a step in a silhouette that is only two storeys tall.
+      const a = f * 0.54;
+      const b = f * 0.44;
+      return [
+        { u: c, v: c, s: a, h, lift: 0, roofed: true },
+        { u: c + f - b, v: c + (f - b) * 0.45, s: b, h: Math.round(h * 0.64), lift: 0, roofed: true },
+      ];
+    }
+    case 'tee': {
+      const main = f * 0.62;
+      const wing = f * 0.38;
+      return [
+        { u: c, v: c + (f - main) / 2, s: main, h, lift: 0, roofed: true },
+        { u: c + main * 0.58, v: c, s: wing, h: Math.round(h * 0.8), lift: 0, roofed: true },
+      ];
+    }
     case 'setback': {
       const lower = Math.round(h * 0.62);
       const upper = h - lower;
@@ -691,7 +797,8 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit) {
 
   const rec = buildingRecipe(zoneKey, level, variant, wealth, era);
   const palettes = buildingPalette(zoneKey[0], rec.wealth);
-  const colors = applyEra(palettes[rec.palette % palettes.length], ERAS[rec.era]);
+  const base = applyEra(palettes[rec.palette % palettes.length], ERAS[rec.era]);
+  const colors = { ...base, roof: roofColor(base.roof, rec.roofMaterial) };
 
   const roofRise = rec.roof === 'flat' ? 0 : Math.round(rec.height * rec.roofRise);
   const totalH = recipeHeight(rec) + roofRise + 24;
