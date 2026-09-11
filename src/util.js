@@ -50,6 +50,36 @@ function valueNoise(x, y, seed) {
   return lerp(lerp(n00, n10, u), lerp(n01, n11, u), v);
 }
 
+/**
+ * A bounded cache with least-recently-used eviction.
+ *
+ * A Map iterates in insertion order, so re-inserting an entry on read moves it
+ * to the back and makes the first key the least recently used. That is all an
+ * LRU needs, and it keeps every operation O(1).
+ */
+export function createLruCache(limit) {
+  const entries = new Map();
+  return {
+    get(key) {
+      const hit = entries.get(key);
+      if (hit === undefined) return undefined;
+      entries.delete(key);
+      entries.set(key, hit);
+      return hit;
+    },
+    set(key, value) {
+      if (entries.has(key)) entries.delete(key);
+      entries.set(key, value);
+      if (entries.size > limit) entries.delete(entries.keys().next().value);
+      return value;
+    },
+    has(key) { return entries.has(key); },
+    clear() { entries.clear(); },
+    get size() { return entries.size; },
+    get limit() { return limit; },
+  };
+}
+
 /** 12,345 -> "12,345" */
 export const commas = (n) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 

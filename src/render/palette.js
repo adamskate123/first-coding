@@ -177,6 +177,30 @@ function parseColor(color) {
   return [128, 128, 128];   // visibly wrong, but never invalid
 }
 
+/** Blend two colours. `t` is how far to move from `a` towards `b`. */
+export function mix(a, b, t) {
+  const [r1, g1, b1] = parseColor(a);
+  const [r2, g2, b2] = parseColor(b);
+  const k = Math.max(0, Math.min(1, t));
+  return `rgb(${Math.round(r1 + (r2 - r1) * k)},${Math.round(g1 + (g2 - g1) * k)},${Math.round(b1 + (b2 - b1) * k)})`;
+}
+
+/**
+ * Tint a colour way towards an architectural period.
+ *
+ * The period is mixed *into* the wealth palette rather than replacing it, so
+ * the two compose: a poor Edwardian terrace and a rich one share a period but
+ * not a budget. Glazing carries most of the era signal -- small dark panes
+ * early, bright curtain walling late -- so windows get their own, stronger mix.
+ */
+export function applyEra(way, era) {
+  return {
+    wall: mix(way.wall, era.accent, era.mix),
+    roof: mix(way.roof, era.accent, era.mix * 0.8),
+    win: mix(way.win, era.winAccent, era.winMix),
+  };
+}
+
 /** Shift a colour towards white (t > 1) or black (t < 1). Composable. */
 export function shade(color, t) {
   let [r, g, b] = parseColor(color);

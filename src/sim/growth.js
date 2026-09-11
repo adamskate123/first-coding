@@ -103,6 +103,17 @@ export function updateGrowth(world, rng) {
     if (world.growthTimer[i] >= GROW_THRESHOLD && level < maxLevel) {
       world.level[i] = level + 1;
       world.growthTimer[i] = 0;
+      // A lot is stamped with its period when it is *first* built out, and
+      // keeps it thereafter.
+      //
+      // Restamping on every level change was tried first and is wrong in
+      // practice: a city that keeps growing re-dates its whole stock, so a
+      // district founded in 1910 and steadily improved reads as brand new, and
+      // no historical strata ever survive. Measured on a city expanded in four
+      // waves across a century, every standing lot came out in a single period.
+      // Only clearing the lot resets the date, which is right -- demolition is
+      // what actually replaces a building.
+      if (level === 0) world.recordBuild(i);
       world.dirty = true;
     } else if (world.growthTimer[i] <= DECAY_THRESHOLD && level > 0) {
       world.level[i] = level - 1;

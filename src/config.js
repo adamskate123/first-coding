@@ -19,7 +19,7 @@ export const SEA_LEVEL = 7;          // elevation at or below this is water
 export const TICKS_PER_MONTH = 60;
 export const SPEED_LABELS = ['Paused', 'Slow', 'Normal', 'Fast'];
 export const SPEED_TICK_MS = [Infinity, 420, 150, 45];
-export const START_YEAR = 1950;
+export const START_YEAR = 1900;
 export const START_FUNDS = 60000;
 
 // ----------------------------------------------------------------- terrain --
@@ -144,6 +144,52 @@ export const TAX_MAX = 20;
 /** Annual revenue per resident / per job at a 10% rate, scaled by land value. */
 export const TAX_PER_RESIDENT = 1.15;
 export const TAX_PER_JOB = 1.65;
+
+// -------------------------------------------------------------------- eras --
+
+/**
+ * Architectural periods.
+ *
+ * A lot records the year it was last built or rebuilt, and draws in the style
+ * of that period for as long as it stands. A district that goes up in the
+ * twenties and is never redeveloped still looks like the twenties in 2010,
+ * which is what lets a city accumulate visible history instead of uniformly
+ * modernising.
+ *
+ * `accent` is mixed into the wealth palette rather than replacing it, so era
+ * and wealth compose: a poor Edwardian terrace and a rich one share a period
+ * but not a budget. The remaining fields bend the recipe -- steep roofs and
+ * ornament early, glass and height late.
+ */
+export const ERAS = [
+  {
+    key: 'EDWARDIAN', name: 'Edwardian', from: 1900,
+    accent: '#8a4a38', mix: 0.26, winAccent: '#39404a', winMix: 0.34,
+    pitchBias: 0.85, glassBias: 0.00, height: 0.86, footprint: 0.94, ornament: 1.6,
+  },
+  {
+    key: 'POSTWAR', name: 'Post-war', from: 1940,
+    accent: '#b09a72', mix: 0.15, winAccent: '#5a6b74', winMix: 0.18,
+    pitchBias: 0.55, glassBias: 0.15, height: 0.95, footprint: 1.00, ornament: 1.1,
+  },
+  {
+    key: 'MODERN', name: 'Modern', from: 1970,
+    accent: '#97907f', mix: 0.19, winAccent: '#7f8f94', winMix: 0.22,
+    pitchBias: 0.15, glassBias: 0.55, height: 1.07, footprint: 1.03, ornament: 0.7,
+  },
+  {
+    key: 'CONTEMPORARY', name: 'Contemporary', from: 2000,
+    accent: '#8fa8b8', mix: 0.22, winAccent: '#c4dcea', winMix: 0.36,
+    pitchBias: 0.04, glassBias: 0.80, height: 1.15, footprint: 1.05, ornament: 0.55,
+  },
+];
+
+/** Index of the period a given year falls in. */
+export function eraFor(year) {
+  let index = 0;
+  for (let k = 0; k < ERAS.length; k++) if (year >= ERAS[k].from) index = k;
+  return index;
+}
 
 // ------------------------------------------------------------------ wealth --
 

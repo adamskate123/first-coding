@@ -90,6 +90,23 @@ where the camera starts. Roughly half of all seeds produce a river that
 genuinely splits the map — which is the point, now that you can bridge it.
 `tests/terrain.test.js` asserts those properties across many seeds.
 
+**Eras.** A lot records the year it was first built out and draws in that
+period's style for as long as it stands — Edwardian, post-war, modern,
+contemporary. Steep roofs, small punched windows and ornament early; flat
+roofs, curtain walling and height late. The period is mixed *into* the wealth
+palette rather than replacing it, so the two compose: a poor Edwardian terrace
+and a rich one share a period but not a budget. Periods also bias only within a
+zone's own vocabulary, so a contemporary *house* still has a pitched roof —
+what goes flat in a modern city is the apartment blocks and offices.
+
+A lot keeps its period as it grows, and only demolition resets the date.
+Restamping on every level change was tried first and is wrong in practice:
+measured on a city expanded in four waves across a century, continuous
+improvement re-dated the entire standing stock into a single period and no
+historical strata survived at all. The build year is also the one piece of
+appearance that is authored history rather than derived state, so unlike every
+other field it has to be written into the save.
+
 **Wealth** is the biggest lever on a city's character. Land value is already
 simulated per tile, so it costs almost nothing to let it choose a lot's whole
 style family as well as its density: weathered boards and faded paint at the
@@ -131,7 +148,9 @@ within a jitter band of the level baseline so a building's size still reads as
 its development stage.
 
 All building art is drawn procedurally as isometric volumes at load time and
-cached, so there are no image assets in the repository.
+cached, so there are no image assets in the repository. The cache key is zone
+type x level x variant x wealth x era x lit — over ten thousand combinations —
+so it is held in a bounded LRU rather than a plain map.
 
 ## Layout
 
@@ -166,7 +185,7 @@ tests/              node --test, no DOM required
 npm test            # node --test tests/*.test.js
 ```
 
-92 tests covering the headless half of the game — everything under `src/sim`
+116 tests covering the headless half of the game — everything under `src/sim`
 plus the world model, projection maths, build tools and save format. They
 include regression tests for each bug found so far: the power model energising
 ungrounded wire, the growth oscillation, multi-tile buildings being repainted
@@ -177,7 +196,9 @@ object, so span placement, pricing and refusal are tested through the same code
 path the mouse uses. `tests/buildings.test.js` tests appearance without a
 canvas, by checking the recipes rather than the pixels -- including that the
 three wealth tiers really do produce different buildings, and that all three
-are reachable from land values a city actually produces.
+are reachable from land values a city actually produces. `tests/eras.test.js`
+covers build years being recorded, kept and saved, and the LRU cache's
+eviction.
 
 ## Saving
 
@@ -189,6 +210,8 @@ changes to the balance tables.
 ## Known rough edges
 
 - No tunnels yet, so hills must be gone around rather than through.
+- A century of game time is a long session at present pacing, so a single city
+  will usually span one or two architectural periods rather than all four.
 - Avenues carry more traffic than streets but draw at the same width.
 - Lots are one tile, so there are no large footprint buildings in the zones --
   only service buildings span more than a tile.
@@ -204,6 +227,8 @@ changes to the balance tables.
 - [x] **Wealth tiers, furnished lots and faked ambient occlusion** — land
       value now drives building style, lots carry drives and forecourts, and
       contact shadowing grounds the volumes.
+- [x] **Era styles** — cities start in 1900 and buildings keep the period they
+      went up in, so a city accumulates visible history.
 - [ ] **Tunnels**, so hills can be crossed as well as rivers.
 - [ ] **Water and sewage** as a second utility network, reusing the power
       model's per-network balancing.
@@ -215,8 +240,6 @@ changes to the balance tables.
 - [ ] **Graphs and history**, using the monthly snapshots already recorded.
 - [ ] **Larger maps with chunked terrain caching**, once redraw cost justifies
       it.
-- [ ] **Era styles**, so buildings reflect the decade they went up in. Needs
-      one byte per tile for the build year.
 - [ ] **An offline sprite pipeline**, if the art should go beyond what can be
       drawn at runtime. This is how SimCity 3000 did it, and it would mean
       binary assets and a build step — a change in what the project is.

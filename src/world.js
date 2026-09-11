@@ -7,7 +7,7 @@
  * those sweeps cache-friendly and cheap to serialise.
  */
 
-import { MAP_SIZE, SEA_LEVEL, T, Z, ZONE_INFO, ROAD, BUILDINGS, SERVICE_KEYS, START_FUNDS, START_YEAR, TAX_DEFAULT } from './config.js';
+import { MAP_SIZE, SEA_LEVEL, T, Z, ZONE_INFO, ROAD, BUILDINGS, SERVICE_KEYS, START_FUNDS, START_YEAR, TAX_DEFAULT, eraFor } from './config.js';
 import { fbm, clamp, lerp, hash2 } from './util.js';
 
 /**
@@ -41,6 +41,10 @@ export class World {
     // --- simulated -------------------------------------------------------
     this.level = new Uint8Array(n);            // development stage of a zoned tile
     this.wealth = new Uint8Array(n);           // WEALTH tier the lot presents as
+    // Years since START_YEAR at which the lot was last built or rebuilt. This
+    // is the one piece of appearance that is *authored history* rather than
+    // derived state, so unlike every other field here it has to be saved.
+    this.builtAge = new Uint8Array(n);
     this.pop = new Uint16Array(n);             // residents on this tile
     this.jobs = new Uint16Array(n);            // jobs on this tile
     this.landValue = new Uint8Array(n);
@@ -213,6 +217,7 @@ export class World {
 
     this.level[i] = 0;
     this.wealth[i] = 0;
+    this.builtAge[i] = 0;
     this.pop[i] = 0;
     this.jobs[i] = 0;
     this.growthTimer[i] = 0;
@@ -252,4 +257,15 @@ export class World {
   }
 
   zoneInfo(i) { return ZONE_INFO[this.zone[i]] || null; }
+
+  /** Calendar year a lot was last built or rebuilt. */
+  builtYear(i) { return START_YEAR + this.builtAge[i]; }
+
+  /** Architectural period a lot draws in. */
+  eraOf(i) { return eraFor(this.builtYear(i)); }
+
+  /** Stamp a lot with the current year, as its build date. */
+  recordBuild(i) {
+    this.builtAge[i] = Math.max(0, Math.min(255, this.year - START_YEAR));
+  }
 }

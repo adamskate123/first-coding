@@ -6,7 +6,7 @@
  * priced button on the palette with no other edits.
  */
 
-import { Z, ZONE_INFO, ROAD_INFO, ROAD, BUILDINGS, POWERLINE_COST, BULLDOZE_COST, SPEED_LABELS, TAX_MIN, TAX_MAX, SERVICE_KEYS } from '../config.js';
+import { Z, ZONE_INFO, ROAD_INFO, ROAD, BUILDINGS, POWERLINE_COST, BULLDOZE_COST, SPEED_LABELS, TAX_MIN, TAX_MAX, SERVICE_KEYS, WEALTH_NAMES, ERAS } from '../config.js';
 import { TOOL } from '../tools.js';
 import { money, commas, clamp } from '../util.js';
 
@@ -279,9 +279,12 @@ export class UI {
       else rows.push(row('Jobs', commas(w.jobs[i])));
       rows.push(row('Road access', w.roadAccess[i] ? 'Yes' : 'No'));
       rows.push(row('Power', w.powered[i] ? 'Yes' : 'No'));
-      if (w.level[i] === 0) {
-        const need = info.lvNeed[1];
-        rows.push(row('Land value needed', need));
+      if (w.level[i] > 0) {
+        rows.push(row('Character', WEALTH_NAMES[w.wealth[i]] ?? '-'));
+        rows.push(row('Built', w.builtYear(i)));
+        rows.push(row('Style', ERAS[w.eraOf(i)].name));
+      } else {
+        rows.push(row('Land value needed', info.lvNeed[1]));
       }
     } else if (w.road[i]) {
       const spec = ROAD_INFO[w.road[i]];

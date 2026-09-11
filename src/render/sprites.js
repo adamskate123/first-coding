@@ -23,12 +23,27 @@
  *       bottom (0, N*H)
  */
 
-import { TILE_W, TILE_H, BUILDINGS } from '../config.js';
-import { buildingPalette, TREE_COLORS, FACE, shade } from './palette.js';
-import { hash2, makeRng, clamp } from '../util.js';
+import { TILE_W, TILE_H, BUILDINGS, ERAS } from '../config.js';
+import { buildingPalette, applyEra, TREE_COLORS, FACE, shade } from './palette.js';
+import { hash2, makeRng, clamp, createLruCache } from '../util.js';
 
-const cache = new Map();
 const PAD = 10;
+
+/**
+ * Sprite cache, bounded.
+ *
+ * The key space is zone type x level x variant x wealth x era x lit -- over ten
+ * thousand combinations. A session will only ever touch a fraction of that, but
+ * without a limit the fraction it does touch is never released.
+ */
+const CACHE_LIMIT = 400;
+const cache = createLruCache(CACHE_LIMIT);
+
+const cacheGet = (key) => cache.get(key);
+const cacheSet = (key, sprite) => cache.set(key, sprite);
+
+/** Number of sprites currently held. Exposed for tests. */
+export function spriteCacheSize() { return cache.size; }
 
 /** Distinct designs available per zone type and level. */
 export const VARIANTS = 16;
@@ -113,25 +128,32 @@ const STACK_MIN_HEIGHT = 44;
  * Pure and deterministic: the same arguments always give the same building, so
  * nothing about appearance needs storing or saving.
  */
-export function buildingRecipe(zoneKey, level, variant, wealth = 1) {
+export function buildingRecipe(zoneKey, level, variant, wealth = 1, era = 1) {
   const style = STYLES[zoneKey];
   const heights = ZONE_HEIGHTS[zoneKey];
   if (!style || !heights) return null;
 
   const tier = Math.max(0, Math.min(2, wealth | 0));
+  const periodIndex = Math.max(0, Math.min(ERAS.length - 1, era | 0));
+  const period = ERAS[periodIndex];
   const money = WEALTH_STYLE[tier];
   const category = zoneKey[0];                 // 'R', 'C' or 'I'
   const palettes = buildingPalette(category, tier);
 
   const capped = Math.min(level, heights.length - 1);
   const base = heights[capped];
-  const rng = makeRng(hash2(variant * 131 + capped, zoneKey.length * 37 + capped * 7 + tier * 1013, 0x9e3779b9));
+  const rng = makeRng(hash2(
+    variant * 131 + capped,
+    zoneKey.length * 37 + capped * 7 + tier * 1013 + periodIndex * 7919,
+    0x9e3779b9,
+  ));
   const pick = (pool) => pool[Math.min(pool.length - 1, Math.floor(rng() * pool.length))];
 
   const jitter = 1 + (rng() * 2 - 1) * style.jitter;
-  const height = Math.max(6, Math.round(base * jitter * money.height));
+  const height = Math.max(6, Math.round(base * jitter * money.height * period.height));
   const footprint = clamp(
-    (style.footprint[0] + rng() * (style.footprint[1] - style.footprint[0])) * money.footprint,
+    (style.footprint[0] + rng() * (style.footprint[1] - style.footprint[0]))
+      * money.footprint * period.footprint,
     0.5, 0.97,
   );
 
@@ -148,24 +170,45 @@ export function buildingRecipe(zoneKey, level, variant, wealth = 1) {
     massing = 'single';
   }
 
-  let roof = pick(style.roofs);
+  // The period decides pitch, but only among the forms the zone actually uses.
+  // A contemporary house still has a pitched roof -- what goes flat in a modern
+  // city is the apartment blocks and offices, whose vocabulary includes it.
+  const pitchedOptions = style.roofs.filter((r) => r !== 'flat');
+  const flatAvailable = style.roofs.includes('flat');
+  let roof;
+  if (pitchedOptions.length && (!flatAvailable || rng() < period.pitchBias)) {
+    roof = pitchedOptions[Math.floor(rng() * pitchedOptions.length)];
+  } else {
+    roof = 'flat';
+  }
+
   // Pitched roofs belong on single masses of modest height; on a stacked tower
   // they read as a hat.
   const stacked = massing === 'setback' || massing === 'podium';
   if (stacked || height > 60) roof = 'flat';
 
+  // Glazing carries the period more than anything else: small punched openings
+  // early, continuous curtain walling late.
+  let windows = pick(style.windows);
+  const GLASSY = ['ribbon', 'columns'];
+  const wanted = rng() < period.glassBias
+    ? style.windows.filter((k) => GLASSY.includes(k))
+    : style.windows.filter((k) => !GLASSY.includes(k));
+  if (wanted.length) windows = wanted[Math.floor(rng() * wanted.length)];
+
   const pitched = roof !== 'flat';
-  const chance = (base) => rng() < base * money.detail;
+  const chance = (base) => rng() < base * money.detail * period.ornament;
 
   return {
     wealth: tier,
+    era: periodIndex,
     palette: Math.floor(rng() * palettes.length),
     height,
     footprint,
     massing,
     roof,
     roofRise: clamp((0.38 + rng() * 0.3) * money.roofRise, 0.2, 0.85),
-    windows: pick(style.windows),
+    windows,
     chimney: pitched && chance(style.chimney ?? 0),
     antenna: !pitched && height > 72 && chance(0.55),
     tanks: pitched ? 0 : Math.floor(rng() * 3),
@@ -285,7 +328,9 @@ function windowLayout(style, height, span) {
   const floors = Math.max(1, Math.round(height / 13));
   switch (style) {
     case 'ribbon':   return { cols: 1, rows: floors, insetU: 0.06, insetV: 0.30, skip: 0 };
-    case 'columns':  return { cols: Math.max(2, Math.round(span * 4)), rows: 1, insetU: 0.28, insetV: 0.05, skip: 0 };
+    // Segmented rather than one unbroken stripe per bay: a full-height run of
+    // glazing at this scale reads as a barcode rather than as a curtain wall.
+    case 'columns':  return { cols: Math.max(2, Math.round(span * 4)), rows: Math.max(1, Math.round(floors / 3)), insetU: 0.32, insetV: 0.10, skip: 0 };
     case 'sparse':   return { cols: Math.max(1, Math.round(span * 2)), rows: Math.max(1, Math.round(floors / 2)), insetU: 0.30, insetV: 0.32, skip: 3 };
     default:         return { cols: Math.max(1, Math.round(span * 3)), rows: floors, insetU: 0.22, insetV: 0.24, skip: 7 };
   }
@@ -520,14 +565,14 @@ function recipeHeight(rec) {
  * Returns { canvas, ox, oy } where (ox, oy) is the offset from the tile origin
  * to the sprite's top-left corner.
  */
-export function zoneSprite(zoneKey, level, variant, wealth, lit) {
-  const key = `z:${zoneKey}:${level}:${variant}:${wealth}:${lit ? 1 : 0}`;
-  const hit = cache.get(key);
+export function zoneSprite(zoneKey, level, variant, wealth, era, lit) {
+  const key = `z:${zoneKey}:${level}:${variant}:${wealth}:${era}:${lit ? 1 : 0}`;
+  const hit = cacheGet(key);
   if (hit) return hit;
 
-  const rec = buildingRecipe(zoneKey, level, variant, wealth);
+  const rec = buildingRecipe(zoneKey, level, variant, wealth, era);
   const palettes = buildingPalette(zoneKey[0], rec.wealth);
-  const colors = palettes[rec.palette % palettes.length];
+  const colors = applyEra(palettes[rec.palette % palettes.length], ERAS[rec.era]);
 
   const roofRise = rec.roof === 'flat' ? 0 : Math.round(rec.height * rec.roofRise);
   const totalH = recipeHeight(rec) + roofRise + 24;
@@ -568,15 +613,13 @@ export function zoneSprite(zoneKey, level, variant, wealth, lit) {
     if (rec.awning) awning(ctx, box, colors);
   }
 
-  const sprite = { canvas, ox: -ox, oy: -oy };
-  cache.set(key, sprite);
-  return sprite;
+  return cacheSet(key, { canvas, ox: -ox, oy: -oy });
 }
 
 /** Sprite for a placed service building. */
 export function buildingSprite(type, lit) {
   const key = `b:${type}:${lit ? 1 : 0}`;
-  const hit = cache.get(key);
+  const hit = cacheGet(key);
   if (hit) return hit;
 
   const spec = BUILDINGS[type];
@@ -603,9 +646,7 @@ export function buildingSprite(type, lit) {
     if (spec.supply) drawStacks(ctx, ox, oy, span, height, spec);
   }
 
-  const sprite = { canvas, ox: -ox, oy: -oy };
-  cache.set(key, sprite);
-  return sprite;
+  return cacheSet(key, { canvas, ox: -ox, oy: -oy });
 }
 
 function drawPark(ctx, ox, oy, span) {
@@ -639,16 +680,14 @@ function drawStacks(ctx, ox, oy, span, height, spec) {
 /** A single tree, used for terrain scatter and park decoration. */
 export function treeSprite(variant) {
   const key = `t:${variant}`;
-  const hit = cache.get(key);
+  const hit = cacheGet(key);
   if (hit) return hit;
 
   const w = 26, h = 34;
   const canvas = makeCanvas(w, h);
   const ctx = canvas.getContext('2d');
   drawTreeAt(ctx, w / 2, h - 6, variant);
-  const sprite = { canvas, ox: -w / 2, oy: -(h - 6 - TILE_H / 2) };
-  cache.set(key, sprite);
-  return sprite;
+  return cacheSet(key, { canvas, ox: -w / 2, oy: -(h - 6 - TILE_H / 2) });
 }
 
 function drawTreeAt(ctx, x, baseY, variant) {

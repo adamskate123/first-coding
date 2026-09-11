@@ -138,7 +138,7 @@ export class Renderer {
     } else if (zone !== Z.NONE && w.level[i] > 0) {
       const info = ZONE_INFO[zone];
       const variant = hash2(x, y, 11) % VARIANTS;
-      const sp = zoneSprite(info.key, w.level[i], variant, w.wealth[i], w.powered[i] === 1);
+      const sp = zoneSprite(info.key, w.level[i], variant, w.wealth[i], w.eraOf(i), w.powered[i] === 1);
       ctx.drawImage(sp.canvas, p.x + sp.ox, p.y + sp.oy);
 
       if (w.powered[i] !== 1) this.drawNoPowerMark(p);

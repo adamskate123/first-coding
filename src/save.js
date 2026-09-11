@@ -12,7 +12,7 @@ import { World } from './world.js';
 import { SERVICE_KEYS } from './config.js';
 
 const SAVE_KEY = 'metropolis.save.v1';
-const FORMAT = 1;
+const FORMAT = 2;
 
 /** Uint8Array -> base64, in chunks so large maps don't blow the call stack. */
 function encode(arr) {
@@ -50,6 +50,7 @@ export function serialize(world) {
     road: encode(world.road),
     powerLine: encode(world.powerLine),
     level: encode(world.level),
+    builtAge: encode(world.builtAge),
     buildings: [...world.activeBuildings()].map((b) => ({ t: b.type, x: b.x, y: b.y, on: b.on })),
     log: world.log.slice(-20),
     history: world.history.slice(-240),
@@ -57,7 +58,11 @@ export function serialize(world) {
 }
 
 export function deserialize(data) {
-  if (!data || data.format !== FORMAT) throw new Error('Unrecognised save format');
+  // Format 1 predates build years being recorded. Its cities load fine; their
+  // buildings simply all read as having gone up in the founding year.
+  if (!data || !(data.format === FORMAT || data.format === 1)) {
+    throw new Error('Unrecognised save format');
+  }
 
   const world = new World(data.size, data.seed);
   world.elevation.set(decode(data.elevation, Uint8Array));
@@ -67,6 +72,7 @@ export function deserialize(data) {
   world.road.set(decode(data.road, Uint8Array));
   world.powerLine.set(decode(data.powerLine, Uint8Array));
   world.level.set(decode(data.level, Uint8Array));
+  if (data.builtAge) world.builtAge.set(decode(data.builtAge, Uint8Array));
 
   world.funds = data.funds;
   world.tick = data.tick;
