@@ -1,11 +1,12 @@
 {
   "name": "metropolis",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "A browser city-building simulator: SimCity 3000 presentation, Cities: Skylines simulation depth.",
   "type": "module",
   "private": true,
   "scripts": {
     "start": "python3 -m http.server 8000",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:render": "node tests/render-smoke.mjs"
   }
 }

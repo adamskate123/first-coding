@@ -34,8 +34,25 @@ jobs:
           node-version: '20'
       - run: npm test
 
+  # The unit suite never touches a canvas, so it cannot catch a drawing fault.
+  # Two shipped that way before this job existed, the second of which threw on
+  # every frame a bridge was visible and froze the game. This boots the real
+  # thing in a browser and fails on any page error.
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # Playwright is a test-only tool and is deliberately kept out of
+      # package.json, so the game itself stays dependency-free.
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:render
+
   deploy:
-    needs: test
+    needs: [test, render]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

@@ -8,7 +8,7 @@
  */
 
 import { TICKS_PER_MONTH } from '../config.js';
-import { updateRoadAccess, updatePower } from './networks.js';
+import { updateRoadAccess, updatePower, updateBridgeDecks } from './networks.js';
 import { updateCoverage, updatePollution, updateCrime, updateLandValue } from './fields.js';
 import { updateTraffic } from './traffic.js';
 import { updateDemand } from './demand.js';
@@ -32,6 +32,7 @@ export class Simulation {
 
     if (this.topologyDirty || t % 3 === 0) {
       updateRoadAccess(w);
+      updateBridgeDecks(w);
       updatePower(w);
       this.topologyDirty = false;
     }

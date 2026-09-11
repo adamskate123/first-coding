@@ -8,7 +8,7 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
-Current version **0.7.0**, shown in the title bar. `VERSION` in
+Current version **0.7.1**, shown in the title bar. `VERSION` in
 `src/config.js` is the single source of truth — `package.json` carries the same
 number for tooling and a test asserts the two agree. Minor versions track
 feature releases; saves record the version that wrote them, though
@@ -84,7 +84,9 @@ commercial districts emptying and rebuilding on a cycle forever.
 
 **Bridges** carry no state of their own: a road tile that sits on water *is* a
 bridge, and a power line on water is a crossing. Only price, upkeep and how it
-draws differ — the deck is lifted clear of the water and stood on piers. The
+draws differ — the deck is stood on piers at the level of the banks it joins,
+so the road spans across rather than dipping to the waterline and climbing
+back. The
 road network, traffic solver and power grid all treat a finished span as
 ordinary road, so a bridge becomes a bottleneck exactly the way a real one
 does.
