@@ -20,6 +20,7 @@ import { Simulation } from '../src/sim/index.js';
 import { T, Z, ROAD, BUILDING_POWER } from '../src/config.js';
 import { updateLandValue, updatePrestige } from '../src/sim/fields.js';
 import { updateRoadAccess, updatePower } from '../src/sim/networks.js';
+import { serialize, deserialize } from '../src/save.js';
 
 /** Flat, dry, wired land with a road grid -- no terrain effects to confound. */
 function plainWorld(size = 48) {
@@ -248,4 +249,78 @@ test('but land only just good enough is left alone', () => {
   let risen = 0;
   for (let i = 0; i < w.level.length; i++) if (w.level[i] >= 2) risen++;
   assert.equal(risen, 0, 'a flat market should not lift a lot whose land is merely adequate');
+});
+
+// ---------------------------------------------------------------- arrival --
+
+test('a city that is loaded arrives as valuable as it was when saved', () => {
+  // Standing is derived, not saved, and it is deliberately slow to build. A
+  // loaded city therefore used to arrive believing it was worthless: measured,
+  // land value fell from 186 to 127 and took five game months to recover,
+  // close enough to the abandonment threshold that a slightly different city
+  // would have begun demolishing itself for no visible reason.
+  const w = plainWorld(40);
+  develop(w, 20, 20, 9, 3);
+  w.placeBuilding('gas', 3, 3);
+  w.placeBuilding('gas', 6, 3);
+  for (let y = 3; y <= 20; y++) w.powerLine[w.idx(4, y)] = 1;
+  updateRoadAccess(w);
+  updatePower(w);
+  settle(w, 400);
+
+  const average = (world) => {
+    let sum = 0, n = 0;
+    for (let i = 0; i < world.level.length; i++) {
+      if (world.zone[i] && world.level[i]) { sum += world.landValue[i]; n++; }
+    }
+    return n ? sum / n : 0;
+  };
+  const before = average(w);
+  assert.ok(before > 90, `the test needs a valuable city, got ${before.toFixed(0)}`);
+
+  const restored = deserialize(serialize(w));
+  new Simulation(restored);                     // constructing it primes the fields
+
+  const after = average(restored);
+  assert.ok(after > before * 0.88,
+    `a loaded city lost its value: ${before.toFixed(0)} -> ${after.toFixed(0)}`);
+});
+
+test('a load changes nothing about how the city then behaves', () => {
+  // Stated as a difference on purpose. Whether a given city grows, holds or
+  // empties over the next few months depends on jobs, crime, power and land
+  // value, and chasing an absolute figure here measures all of those instead
+  // of the one thing at issue: that passing through a save file changes
+  // nothing. Two copies of one city, one of them round-tripped, must end up in
+  // the same place.
+  const build = () => {
+    const w = plainWorld(40);
+    develop(w, 20, 20, 9, 2);
+    for (const [x, y] of [[3, 3], [7, 3], [3, 7], [7, 7]]) w.placeBuilding('gas', x, y);
+    updateRoadAccess(w);
+    updatePower(w);
+    settle(w, 400);
+    return w;
+  };
+
+  const tally = (world) => {
+    const levels = [0, 0, 0, 0, 0];
+    for (let i = 0; i < world.level.length; i++) {
+      if (world.zone[i]) levels[Math.min(4, world.level[i])]++;
+    }
+    return levels.join('/');
+  };
+
+  const straight = build();
+  const roundTripped = deserialize(serialize(build()));
+  assert.equal(tally(roundTripped), tally(straight), 'the save file itself lost something');
+
+  const runOn = (world) => {
+    const sim = new Simulation(world);
+    for (let t = 0; t < 600; t++) sim.step();
+    return tally(world);
+  };
+
+  assert.equal(runOn(roundTripped), runOn(straight),
+    'a city that has been through a save file behaved differently afterwards');
 });
