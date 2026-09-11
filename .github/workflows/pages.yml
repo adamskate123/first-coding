@@ -1,7 +1,13 @@
 # Publishes the game to GitHub Pages. There is no build step -- the repository
 # is already a static site -- so this uploads it as-is.
 #
-# To enable: repository Settings -> Pages -> Source: "GitHub Actions".
+# `enablement: true` lets the workflow create the Pages site itself the first
+# time it runs, so there is no manual Settings step to remember and the setup
+# is reproducible from the repository alone. It needs the `pages: write`
+# permission granted below.
+#
+# GitHub Pages is only available on private repositories with a paid plan, so
+# on the free tier the repository has to be public for this to work at all.
 name: Deploy to Pages
 
 on:
@@ -37,6 +43,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
