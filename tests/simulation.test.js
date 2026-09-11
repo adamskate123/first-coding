@@ -672,10 +672,12 @@ test('wealth tier has hysteresis, so a district on a boundary does not flicker',
 
 test('all three wealth tiers are reachable from land values a city actually produces', () => {
   // Bands set naively across the full 0-255 range left the top tier
-  // unreachable: developed lots top out near 130 in a well-serviced city, so a
-  // threshold of 155 meant no city ever grew an affluent quarter.
+  // unreachable, and this test has had to be recalibrated once already: with
+  // land value now fed by the density around a lot, a compact well-run city
+  // measures a built-lot average of 183 and a peak of 238, where a sprawling
+  // one still averages about 110. The band scanned here is that real range.
   const reached = new Set();
-  for (let lv = 60; lv <= 140; lv += 2) reached.add(wealthTier(lv, wealthTier(lv, 0)));
+  for (let lv = 60; lv <= 210; lv += 2) reached.add(wealthTier(lv, wealthTier(lv, 0)));
   assert.ok(reached.has(0), 'no land value in normal range reads as modest');
   assert.ok(reached.has(1), 'no land value in normal range reads as comfortable');
   assert.ok(reached.has(2), 'affluence is unreachable in a real city');

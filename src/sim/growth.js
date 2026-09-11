@@ -26,6 +26,34 @@ const DECAY_THRESHOLD = -24;
 
 /** Demand must clear this before anyone builds. */
 const GROW_DEMAND = 0.08;
+/**
+ * ...unless the land has outgrown what stands on it.
+ *
+ * A market settles: supply meets demand, demand returns to zero, and nothing
+ * is ever built again. Measured, that capped every city two levels below the
+ * top whatever its land was worth -- a downtown parcel valued at 209 sat under
+ * a three-storey building because the city as a whole no longer needed housing.
+ *
+ * Real redevelopment does not wait for a shortage. A site worth far more than
+ * its current use gets rebuilt to that use, and it is the whole reason a
+ * valuable centre keeps growing upwards while the suburbs around it stay put.
+ * So a lot whose land clears its next threshold by this margin will improve in
+ * a flat market, though not in a falling one.
+ */
+const REDEVELOP_MARGIN = 25;
+const REDEVELOP_DEMAND = -0.02;
+/**
+ * ...and slowly.
+ *
+ * Redevelopment adds capacity, capacity satisfies demand, and satisfied demand
+ * stops the next lot building -- a control loop with a lag in it, which will
+ * oscillate if the gain is high. Letting every qualifying lot redevelop at the
+ * ordinary rate produced exactly that: population swinging between 9.8k and
+ * 17.8k every few years as whole districts built out together, crashed the
+ * market and emptied. At a trickle the same districts reach the same density
+ * and stay there.
+ */
+const REDEVELOP_CHANCE = 0.07;
 /** ...and fall below this before anyone walks away. */
 const ABANDON_DEMAND = -0.40;
 
@@ -51,6 +79,7 @@ export function updateGrowth(world, rng) {
     const powered = world.powered[i] === 1;
 
     let pressure = 0;
+    let redevelop = false;
 
     if (!connected) {
       pressure = -3;                       // nothing gets built off-road
@@ -64,13 +93,20 @@ export function updateGrowth(world, rng) {
       // Can the land support the next step up?
       const canUpgrade = level < maxLevel && lv >= needed;
       // Has the neighbourhood fallen below what this building needs?
-      const undercut = level > 0 && lv < info.lvNeed[level] - 22;
+      // Wide enough that an ordinary wobble in land value does not empty a
+      // district: with value now feeding back from density, a narrow band let
+      // a dip abandon whole quarters and take the value down with them.
+      const undercut = level > 0 && lv < info.lvNeed[level] - 34;
 
       if (undercut) {
         pressure = -2;
       } else if (demand > GROW_DEMAND && canUpgrade) {
         // Strong demand and good land build faster.
         pressure = 1 + (demand > 0.4 ? 1 : 0) + (lv > needed + 40 ? 1 : 0);
+      } else if (canUpgrade && demand > REDEVELOP_DEMAND && lv >= needed + REDEVELOP_MARGIN) {
+        // The land has outgrown the building on it.
+        pressure = 1;
+        redevelop = true;
       } else if (demand < ABANDON_DEMAND) {
         pressure = level > 0 ? -1 : 0;     // deep oversupply empties the weakest stock
       } else {
@@ -88,7 +124,9 @@ export function updateGrowth(world, rng) {
     // Both directions are gated on a die roll. Without it every lot in a
     // district reaches its threshold on the same tick and the city pulses.
     if (pressure > 0) {
-      if (rng() < GROW_CHANCE) world.growthTimer[i] = clamp(world.growthTimer[i] + pressure, -60, 60);
+      if (rng() < (redevelop ? REDEVELOP_CHANCE : GROW_CHANCE)) {
+        world.growthTimer[i] = clamp(world.growthTimer[i] + pressure, -60, 60);
+      }
     } else if (pressure < 0) {
       // Losing power or road access is felt immediately; mere oversupply is not.
       const urgent = !connected || !powered;

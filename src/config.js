@@ -9,7 +9,7 @@
  * Minor versions track feature releases (bridges, wealth tiers, eras, relief);
  * the patch digit is for fixes and tuning.
  */
-export const VERSION = '0.10.0';
+export const VERSION = '0.12.0';
 
 /**
  * Central tuning constants.
@@ -267,12 +267,14 @@ export const WEALTH_NAMES = ['Modest', 'Comfortable', 'Affluent'];
  * Land value at which a lot moves up to the next tier.
  *
  * Calibrated against what land value developed lots actually reach in play,
- * not against the theoretical 0-255 range: a serviced city sits around 100 and
- * a well-parked, well-schooled district tops out near 130. Bands set naively
- * across the full range left the top tier unreachable, so no city ever grew an
- * affluent quarter.
+ * not against the theoretical 0-255 range. Measured: a sprawling city averages
+ * about 110 on its built lots, while a compact, well-serviced one with a real
+ * centre averages 183 and peaks near 240 -- the difference being the density
+ * feedback in land value, which is what lets a downtown outgrow its suburbs.
+ * Bands set naively across the full range left the top tier unreachable, so no
+ * city ever grew an affluent quarter.
  */
-export const WEALTH_THRESHOLDS = [78, 115];
+export const WEALTH_THRESHOLDS = [92, 142];
 /** How far past a boundary the land must go before the tier actually changes. */
 export const WEALTH_HYSTERESIS = 12;
 

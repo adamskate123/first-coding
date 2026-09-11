@@ -142,6 +142,8 @@ export function updateCrime(world) {
  * result is blurred so values grade smoothly across a neighbourhood instead of
  * snapping tile by tile.
  */
+const SERVICE_LIFT = 62;
+
 export function updateLandValue(world) {
   const s = world.size, n = s * s;
   const wd = waterDistance(world);
@@ -157,8 +159,11 @@ export function updateLandValue(world) {
     v += clamp((world.elevation[i] - 8) * 1.4, -6, 16); // views from the hills
     if (world.tree[i]) v += 7;
 
+    // Services lift land, but they cannot be the whole story: at the old scale
+    // a thoroughly serviced city sat at 125-150 almost everywhere, which left
+    // no gradient for density to climb and made every district equally prime.
     for (const k of SERVICE_KEYS) {
-      v += (world.coverage[k][i] / 255) * 100 * SERVICE_WEIGHT[k];
+      v += (world.coverage[k][i] / 255) * SERVICE_LIFT * SERVICE_WEIGHT[k];
     }
 
     if (world.roadAccess[i]) v += 10;
@@ -175,9 +180,147 @@ export function updateLandValue(world) {
   }
 
   const smooth = diffuse(world, raw, 2, 1.0);
+  const prestige = updatePrestige(world);
   for (let i = 0; i < n; i++) {
-    world.landValue[i] = world.terrain[i] === T.WATER ? 0 : clamp(Math.round(smooth[i]), 0, 255);
+    world.landValue[i] = world.terrain[i] === T.WATER
+      ? 0
+      : clamp(Math.round(smooth[i] + prestige[i]), 0, 255);
   }
+}
+
+/**
+ * Agglomeration: value begets value.
+ *
+ * Land value used to be a sum of amenities and nuisances, which gave every
+ * district the same ceiling -- measured across a fully built 96x96 city, the
+ * highest land value anywhere was 94, while dense residential needs 140 to
+ * reach its third level and 180 for its fourth. The top half of the game was
+ * unreachable by construction, not by bad play: the towers and the wealthy
+ * tier existed in the art and could never be built.
+ *
+ * What was missing is the feedback real cities run on. Development raises the
+ * value of the land around it, which supports denser development, which raises
+ * it further -- so a centre emerges where investment concentrates rather than
+ * value being a thin function of parks and coastline. The effect saturates, so
+ * a core plateaus instead of running away, and it is spatial, so building a
+ * second downtown across the river means starting again rather than inheriting
+ * the first one's prestige.
+ *
+ * Deliberately added *after* the amenity blur rather than before it. A box
+ * blur can never produce a maximum higher than its input -- it only ever
+ * lowers peaks -- so mixing this in beforehand would flatten the very thing it
+ * exists to create.
+ */
+const PRESTIGE_BY_LEVEL = [0, 7, 15, 26, 38];
+/**
+ * Tiles. District scale, not street scale -- but narrower than it looks: three
+ * passes of a radius-7 window reach about twenty tiles, which is wider than
+ * most districts, so a neighbourhood ended up diluting itself against the
+ * empty land around it. Measured, a 13-tile block of towers earned 22 points
+ * of a possible 90.
+ */
+const PRESTIGE_RADIUS = 5;
+const PRESTIGE_PASSES = 2;
+const PRESTIGE_CAP = 90;           // most a neighbourhood can earn this way
+/**
+ * Blurred concentration at which a district earns the whole cap.
+ *
+ * Set from measurement, not from the table above: a district is not solid
+ * towers, it is towers with streets, power lines and vacant lots between them,
+ * so the smoothed figure even in a dense core runs about half what the
+ * per-lot scores suggest. Reading it off the table gave a downtown eleven
+ * points of a hundred and no visible feedback at all.
+ */
+const PRESTIGE_REF = 15;
+/** Above one, so ordinary streets earn little and only a real core earns a lot. */
+const PRESTIGE_CURVE = 1.7;
+/** How fast a neighbourhood's standing follows what is built on it. */
+const PRESTIGE_EASE = 0.06;
+
+export function updatePrestige(world) {
+  const s = world.size, n = s * s;
+  const src = world._prestigeSrc && world._prestigeSrc.length === n
+    ? world._prestigeSrc : (world._prestigeSrc = new Float32Array(n));
+  const out = world.prestige && world.prestige.length === n
+    ? world.prestige : (world.prestige = new Float32Array(n));
+  src.fill(0);
+
+  let any = false;
+  for (let i = 0; i < n; i++) {
+    const level = world.level[i];
+    if (!level || !world.zone[i]) continue;
+    any = true;
+    // Wealthier stock carries more of the neighbourhood with it, and a lot
+    // that is dark or cut off is contributing nothing to anybody.
+    const tier = 1 + world.wealth[i] * 0.22;
+    src[i] = (PRESTIGE_BY_LEVEL[Math.min(4, level)] || 0) * tier * (world.powered[i] ? 1 : 0.35);
+  }
+  if (!any) { out.fill(0); return out; }
+
+  const target = world._prestigeTarget && world._prestigeTarget.length === n
+    ? world._prestigeTarget : (world._prestigeTarget = new Float32Array(n));
+  boxBlur(world, src, target, PRESTIGE_RADIUS, PRESTIGE_PASSES);
+
+  // Capped, and deliberately steeper than linear. An exponential knee was tried
+  // first and handed nearly the whole lift to any built-up street at all, which
+  // made a uniformly developed city uniformly prime -- measured, 1786 of 1975
+  // lots came out in the top wealth tier, and a city with no poor districts has
+  // no gradient for the market to climb.
+  // Eased towards the figure rather than snapped to it, because this is a
+  // feedback loop: value raises density, density raises value. Recomputed from
+  // scratch each pass it oscillated hard -- measured on one city, population
+  // swung 9.9k -> 16.8k -> 18.6k and land value 137 -> 92 -> 159 as districts
+  // built out, crashed the market, emptied and rebuilt. Standing in a city
+  // watching whole quarters blink in and out is worse than no feedback at all.
+  //
+  // Land values are sticky in reality for the same reason: a neighbourhood's
+  // reputation is a memory of what has stood there, not a reading of what
+  // stands there this month.
+  for (let i = 0; i < n; i++) {
+    const v = Math.min(1, target[i] / PRESTIGE_REF);
+    const goal = PRESTIGE_CAP * Math.pow(v, PRESTIGE_CURVE);
+    out[i] += (goal - out[i]) * PRESTIGE_EASE;
+  }
+  return out;
+}
+
+/**
+ * Separable box blur with a sliding window, so the cost does not depend on the
+ * radius. The narrow [1,2,1] kernel below is right for smoothing a field over
+ * a few tiles; spreading influence across a whole district with it would take
+ * over a hundred passes.
+ */
+function boxBlur(world, src, dst, radius, passes) {
+  const s = world.size, n = s * s;
+  const tmp = world._blurTmp && world._blurTmp.length === n
+    ? world._blurTmp : (world._blurTmp = new Float32Array(n));
+  const width = radius * 2 + 1;
+  dst.set(src);
+
+  for (let p = 0; p < passes; p++) {
+    // horizontal
+    for (let y = 0; y < s; y++) {
+      const row = y * s;
+      let sum = 0;
+      for (let k = -radius; k <= radius; k++) sum += dst[row + clamp(k, 0, s - 1)];
+      for (let x = 0; x < s; x++) {
+        tmp[row + x] = sum / width;
+        sum -= dst[row + clamp(x - radius, 0, s - 1)];
+        sum += dst[row + clamp(x + radius + 1, 0, s - 1)];
+      }
+    }
+    // vertical
+    for (let x = 0; x < s; x++) {
+      let sum = 0;
+      for (let k = -radius; k <= radius; k++) sum += tmp[clamp(k, 0, s - 1) * s + x];
+      for (let y = 0; y < s; y++) {
+        dst[y * s + x] = sum / width;
+        sum -= tmp[clamp(y - radius, 0, s - 1) * s + x];
+        sum += tmp[clamp(y + radius + 1, 0, s - 1) * s + x];
+      }
+    }
+  }
+  return dst;
 }
 
 /**

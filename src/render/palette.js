@@ -32,6 +32,32 @@ export const ROAD_COLORS = {
 };
 
 /**
+ * What a roof is made of.
+ *
+ * The roof is the surface an isometric camera sees most of -- measured on a
+ * dense city, changing every wall in the frame moved only 3% of its pixels
+ * because the roofs, which are most of what is on screen, were untouched. So
+ * roofs get their own material rather than inheriting a shade of the wall: a
+ * street of tiled pitches and tarred flats reads as a street, where a street
+ * of walls in slightly different browns reads as one building repeated.
+ */
+export const ROOF_MATERIALS = [
+  { key: 'tile', tint: '#96553c', mix: 0.5 },
+  { key: 'slate', tint: '#464d57', mix: 0.52 },
+  { key: 'lead', tint: '#6d7175', mix: 0.42 },
+  { key: 'tar', tint: '#39382f', mix: 0.55 },
+  { key: 'copper', tint: '#4c7d6a', mix: 0.38 },
+  { key: 'garden', tint: '#5f7f45', mix: 0.5 },
+  { key: 'gravel', tint: '#8a8375', mix: 0.4 },
+];
+
+/** Tint a palette's roof colour towards a material. */
+export function roofColor(base, material) {
+  const m = ROOF_MATERIALS[material % ROOF_MATERIALS.length];
+  return mix(base, m.tint, m.mix);
+}
+
+/**
  * Paintwork for the traffic.
  *
  * Muted and a little dusty, so a street full of cars reads as texture rather

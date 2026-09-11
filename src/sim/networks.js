@@ -165,6 +165,52 @@ function conducts(world, i) {
 }
 
 /**
+ * Spend a short network's supply on as much of its load as it will cover.
+ *
+ * A grid one percent short used to black out everything on it, because a
+ * network was either energised or it was not. Measured on a city that grew
+ * into its supply, a 1.9% shortfall darkened 100% of the load, and since
+ * losing power makes a lot decay immediately rather than on a die roll, the
+ * whole city emptied, demand collapsed, the lights came back, and it rebuilt
+ * -- a cycle that repeated for as long as it was left running.
+ *
+ * Real grids shed load; so does this now. Consumers are served in a fixed
+ * order until the supply runs out, so the same districts stay dark rather than
+ * flickering -- a consistently unserved quarter is something a player can see
+ * in the power view and fix, where a city-wide strobe is only bewildering.
+ * Returns the demand left unserved.
+ */
+function allocate(world, net) {
+  let budget = net.supply;
+  let unserved = 0;
+  const counted = new Set();
+
+  for (const i of net.tiles) {
+    let draw = 0;
+    const bIdx = world.build[i];
+    if (bIdx !== -1) {
+      if (counted.has(bIdx)) { world.powered[i] = world.powered[net.anchor.get(bIdx)] || 0; continue; }
+      counted.add(bIdx);
+      const b = world.buildings[bIdx];
+      const spec = BUILDINGS[b.type];
+      draw = spec.supply ? 0 : (BUILDING_POWER[b.type] || 0);
+      net.anchor.set(bIdx, i);
+    } else {
+      const zi = ZONE_INFO[world.zone[i]];
+      draw = zi && world.level[i] > 0 ? (zi.power[world.level[i]] || 0) : 0;
+    }
+
+    if (draw <= budget) {
+      budget -= draw;
+      world.powered[i] = 1;
+    } else {
+      unserved += draw;
+    }
+  }
+  return unserved;
+}
+
+/**
  * Partition conductive tiles into networks, then balance each network.
  *
  * A network short of supply browns out: every consumer on it loses power, which
@@ -183,7 +229,7 @@ export function updatePower(world) {
     if (world.netId[start] !== -1 || !conducts(world, start)) continue;
 
     const id = nets.length;
-    const net = { id, supply: 0, demand: 0, tiles: [] };
+    const net = { id, supply: 0, demand: 0, tiles: [], anchor: new Map() };
     nets.push(net);
 
     let sp = 0;
@@ -231,6 +277,8 @@ export function updatePower(world) {
     net.energised = net.supply > 0 && net.supply >= net.demand;
     if (net.energised) {
       for (const i of net.tiles) world.powered[i] = 1;
+    } else if (net.supply > 0) {
+      unservedDemand += allocate(world, net);
     } else {
       unservedDemand += net.demand;
     }
