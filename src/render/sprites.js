@@ -25,6 +25,7 @@
 
 import { TILE_W, TILE_H, BUILDINGS, ERAS } from '../config.js';
 import { buildingPalette, applyEra, TREE_COLORS, FACE, shade } from './palette.js';
+import { facadeStyle, facadePlan, EL } from './facade.js';
 import { hash2, makeRng, clamp, createLruCache } from '../util.js';
 
 const PAD = 10;
@@ -217,6 +218,10 @@ export function buildingRecipe(zoneKey, level, variant, wealth = 1, era = 1) {
     antenna: !pitched && height > 72 && chance(0.55),
     tanks: pitched ? 0 : Math.floor(rng() * 3),
     awning: !!style.awning && chance(style.awning),
+    // How this building's walls are organised. Drawn from the same generator,
+    // so it is as much a part of the design as the massing.
+    facade: facadeStyle(rng, category, tier, periodIndex),
+    category,
     seed: hash2(variant, capped * 8 + tier, 0x51ed),
   };
 }
@@ -277,14 +282,22 @@ function occludeFace(ctx, pts, baseY, height) {
   ctx.fill();
 }
 
-/** A soft contact shadow on the ground, offset away from the light. */
-function groundShadow(ctx, ox, oy, span) {
+/**
+ * The shadow a building drops on its own plot.
+ *
+ * Cast down and to the right, away from the light the faces are already shaded
+ * for, and lengthened by the building's height -- a tower throwing the same
+ * stub of shade as a bungalow is one of those things nobody consciously
+ * notices and everybody reads as wrong. Layered at low alpha rather than
+ * blurred: canvas filter support is patchy enough not to rely on.
+ */
+function groundShadow(ctx, ox, oy, span, height = 0) {
+  const reach = clamp(height * 0.22, 0, 14);
   for (let k = 3; k >= 1; k--) {
     const grow = 1 + k * 0.07;
-    // Keep the enlarged rhombus concentric with the footprint.
     const oyAdj = oy + ((span - span * grow) * TILE_H) / 2;
-    ctx.fillStyle = `rgba(28, 34, 24, ${0.07})`;
-    rhombus(ctx, ox + 3, oyAdj + 2, span * grow, 0);
+    ctx.fillStyle = 'rgba(26, 32, 22, 0.075)';
+    rhombus(ctx, ox + 3 + reach, oyAdj + 2 + reach * 0.5, span * grow, 0);
     ctx.fill();
   }
 }
@@ -324,54 +337,156 @@ function isoBox(ctx, ox, oy, span, height, colors) {
   rhombus(ctx, ox, oy, span, height);
   ctx.fill();
 
+  if (height >= 3) {
+    // A darker line around the silhouette. Flat-filled volumes of similar
+    // value merge into each other without one, which is most of why a dense
+    // block reads as a single grey mass rather than as separate buildings.
+    ctx.strokeStyle = shade(colors.wall, 0.42);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(left.x, left.y - height);
+    ctx.lineTo(left.x, left.y);
+    ctx.lineTo(bottom.x, bottom.y);
+    ctx.lineTo(right.x, right.y);
+    ctx.lineTo(right.x, right.y - height);
+    ctx.stroke();
+
+    // The vertical corner facing the light catches it.
+    ctx.strokeStyle = shade(colors.wall, 1.28);
+    ctx.beginPath();
+    ctx.moveTo(bottom.x, bottom.y - height);
+    ctx.lineTo(bottom.x, bottom.y);
+    ctx.stroke();
+
+    // ...and so does the roof edge on that side.
+    ctx.beginPath();
+    ctx.moveTo(left.x, left.y - height);
+    ctx.lineTo(ox, oy - height);
+    ctx.lineTo(right.x, right.y - height);
+    ctx.stroke();
+  }
+
   return { ox, oy, span, bottom, left, right, w2, h2, height };
 }
 
-/** Window layout parameters for each treatment. */
-function windowLayout(style, height, span) {
-  const floors = Math.max(1, Math.round(height / 13));
-  switch (style) {
-    case 'ribbon':   return { cols: 1, rows: floors, insetU: 0.06, insetV: 0.30, skip: 0 };
-    // Segmented rather than one unbroken stripe per bay: a full-height run of
-    // glazing at this scale reads as a barcode rather than as a curtain wall.
-    case 'columns':  return { cols: Math.max(2, Math.round(span * 4)), rows: Math.max(1, Math.round(floors / 3)), insetU: 0.32, insetV: 0.10, skip: 0 };
-    case 'sparse':   return { cols: Math.max(1, Math.round(span * 2)), rows: Math.max(1, Math.round(floors / 2)), insetU: 0.30, insetV: 0.32, skip: 3 };
-    default:         return { cols: Math.max(1, Math.round(span * 3)), rows: floors, insetU: 0.22, insetV: 0.24, skip: 7 };
-  }
-}
-
 /**
- * Lay windows across one face. `anchor` is the face's lower corner and `du`
- * the vector along its base.
+ * Paint one facade plan onto a face.
+ *
+ * `anchor` is the face's lower corner and `du` the vector along its base, so a
+ * plan's (u, v) maps to a parallelogram lying in the plane of the wall. The
+ * face's own shading factor is passed in so an opening on the dark side of the
+ * building stays on the dark side -- glass that ignores which way it faces is
+ * the fastest way to flatten a volume back out.
  */
-function windows(ctx, anchor, du, height, layout, color, seedBase, lit) {
-  const { cols, rows, insetU, insetV, skip } = layout;
-  if (cols < 1 || rows < 1 || height < 8) return;
+function paintFacade(ctx, anchor, du, plan, colors, lit, seed, faceTint) {
+  const rect = (e) => {
+    ctx.beginPath();
+    ctx.moveTo(anchor.x + du.x * e.u0, anchor.y + du.y * e.u0 - e.v0);
+    ctx.lineTo(anchor.x + du.x * e.u1, anchor.y + du.y * e.u1 - e.v0);
+    ctx.lineTo(anchor.x + du.x * e.u1, anchor.y + du.y * e.u1 - e.v1);
+    ctx.lineTo(anchor.x + du.x * e.u0, anchor.y + du.y * e.u0 - e.v1);
+    ctx.closePath();
+  };
 
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const h = hash2(c, r, seedBase);
-      // A scattering of dark windows keeps facades from looking printed.
-      if (skip > 0 && (h & skip) === 0) continue;
-      const on = lit && (h & 3) !== 0;
+  const glass = shade(colors.win, faceTint);
+  const glassLit = shade(colors.win, faceTint * 2.1);
+  const frame = shade(colors.wall, faceTint * 0.72);
+  const trim = shade(colors.wall, faceTint * 1.18);
 
-      const u0 = (c + insetU) / cols, u1 = (c + 1 - insetU) / cols;
-      const v0 = height * ((r + insetV) / rows), v1 = height * ((r + 1 - insetV) / rows);
-      ctx.fillStyle = on ? shade(color, 1.35) : shade(color, 0.75);
-      ctx.beginPath();
-      ctx.moveTo(anchor.x + du.x * u0, anchor.y + du.y * u0 - v0);
-      ctx.lineTo(anchor.x + du.x * u1, anchor.y + du.y * u1 - v0);
-      ctx.lineTo(anchor.x + du.x * u1, anchor.y + du.y * u1 - v1);
-      ctx.lineTo(anchor.x + du.x * u0, anchor.y + du.y * u0 - v1);
-      ctx.closePath();
-      ctx.fill();
+  for (let k = 0; k < plan.elements.length; k++) {
+    const e = plan.elements[k];
+    const h = hash2(k, seed, 0x2f6b);
+
+    switch (e.kind) {
+      case EL.CORNICE:
+      case EL.STRING:
+        ctx.fillStyle = trim;
+        rect(e);
+        ctx.fill();
+        break;
+
+      case EL.PIER:
+        ctx.fillStyle = frame;
+        rect(e);
+        ctx.fill();
+        break;
+
+      case EL.SHOPFRONT: {
+        // A stall riser under the glass and a fascia over it: the two things
+        // that make a shopfront read as a shop rather than a big window.
+        const riser = { ...e, v1: e.v0 + (e.v1 - e.v0) * 0.16 };
+        const pane = { ...e, v0: e.v0 + (e.v1 - e.v0) * 0.16, v1: e.v1 - (e.v1 - e.v0) * 0.14 };
+        const fascia = { ...e, v0: e.v1 - (e.v1 - e.v0) * 0.14 };
+        ctx.fillStyle = frame; rect(riser); ctx.fill();
+        ctx.fillStyle = lit ? glassLit : glass; rect(pane); ctx.fill();
+        ctx.fillStyle = (h & 7) === 0 ? shade(colors.roof, 1.1) : trim;
+        rect(fascia); ctx.fill();
+        break;
+      }
+
+      case EL.DOOR:
+        ctx.fillStyle = frame;
+        rect(e);
+        ctx.fill();
+        ctx.fillStyle = shade(colors.roof, faceTint * 0.9);
+        rect({ ...e, u0: e.u0 + (e.u1 - e.u0) * 0.18, u1: e.u1 - (e.u1 - e.u0) * 0.18, v1: e.v1 - (e.v1 - e.v0) * 0.12 });
+        ctx.fill();
+        break;
+
+      case EL.LOUVRE: {
+        ctx.fillStyle = frame;
+        rect(e);
+        ctx.fill();
+        // Three slats, enough to read as plant at this size.
+        const band = (e.v1 - e.v0) / 5;
+        ctx.fillStyle = shade(colors.wall, faceTint * 0.55);
+        for (let b = 1; b < 5; b += 2) {
+          rect({ ...e, v0: e.v0 + band * b, v1: e.v0 + band * (b + 0.7) });
+          ctx.fill();
+        }
+        break;
+      }
+
+      case EL.BALCONY: {
+        ctx.fillStyle = lit && (h & 3) !== 0 ? glassLit : glass;
+        rect(e);
+        ctx.fill();
+        // The slab and its rail, standing proud of the wall.
+        ctx.fillStyle = trim;
+        rect({ u0: e.u0 - 0.008, u1: e.u1 + 0.008, v0: e.v0 - 1.6, v1: e.v0 });
+        ctx.fill();
+        ctx.fillStyle = frame;
+        rect({ u0: e.u0 - 0.008, u1: e.u1 + 0.008, v0: e.v0, v1: e.v0 + (e.v1 - e.v0) * 0.34 });
+        ctx.fill();
+        break;
+      }
+
+      default: {
+        // A window: a frame, the pane, and a sill if the building runs to one.
+        ctx.fillStyle = frame;
+        rect(e);
+        ctx.fill();
+        const inset = 0.14;
+        const uw = (e.u1 - e.u0) * inset, vh = (e.v1 - e.v0) * inset;
+        ctx.fillStyle = lit && (h & 3) !== 0 ? glassLit : glass;
+        rect({ u0: e.u0 + uw, u1: e.u1 - uw, v0: e.v0 + vh, v1: e.v1 - vh });
+        ctx.fill();
+        // A few rooms have the blinds down.
+        if ((h & 15) === 0) {
+          ctx.fillStyle = trim;
+          rect({ u0: e.u0 + uw, u1: e.u1 - uw, v0: e.v1 - vh - (e.v1 - e.v0) * 0.3, v1: e.v1 - vh });
+          ctx.fill();
+        }
+        break;
+      }
     }
   }
 }
 
-function dressBox(ctx, box, layout, colors, seed, lit) {
-  windows(ctx, box.left, { x: box.w2, y: box.h2 }, box.height, layout, colors.win, seed, lit);
-  windows(ctx, box.bottom, { x: box.w2, y: -box.h2 }, box.height, layout, colors.win, seed + 91, lit);
+/** Paint both visible faces of a box from one plan. */
+function dressBox(ctx, box, plan, colors, seed, lit) {
+  paintFacade(ctx, box.left, { x: box.w2, y: box.h2 }, plan, colors, lit, seed, FACE.left);
+  paintFacade(ctx, box.bottom, { x: box.w2, y: -box.h2 }, plan, colors, lit, seed + 91, FACE.right);
 }
 
 // ------------------------------------------------------------------ roofs --
@@ -588,7 +703,7 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit) {
   const ox = w / 2;
   const oy = totalH + PAD;
 
-  groundShadow(ctx, ox, oy + ((1 - rec.footprint) * TILE_H) / 2, rec.footprint);
+  groundShadow(ctx, ox, oy + ((1 - rec.footprint) * TILE_H) / 2, rec.footprint, recipeHeight(rec));
 
   // Back to front within the lot, then bottom to top for stacked masses.
   const parts = massingParts(rec)
@@ -597,7 +712,9 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit) {
   for (const part of parts) {
     const off = isoOffset(part.u, part.v);
     const box = isoBox(ctx, ox + off.x, oy + off.y - part.lift, part.s, part.h, colors);
-    dressBox(ctx, box, windowLayout(rec.windows, part.h, part.s), colors, rec.seed + part.u * 1000, lit);
+    const faceWidth = Math.hypot(box.w2, box.h2);
+    const plan = facadePlan(rec.facade, part.h, faceWidth, rec.category, rec.seed + Math.round(part.u * 1000));
+    dressBox(ctx, box, plan, colors, rec.seed + part.u * 1000, lit);
 
     if (!part.roofed) {
       flatRoofDetail(ctx, box, colors, { ...rec, tanks: 0, antenna: false });
@@ -641,11 +758,15 @@ export function buildingSprite(type, lit) {
   if (spec.category === 'park') {
     drawPark(ctx, ox, oy, span);
   } else {
-    groundShadow(ctx, ox, oy + ((span - span * 0.9) * TILE_H) / 2, span * 0.9);
+    groundShadow(ctx, ox, oy + ((span - span * 0.9) * TILE_H) / 2, span * 0.9, height);
     const colors = { wall: spec.color, roof: shade(spec.color, 0.86), win: '#cfe0e6' };
     const box = isoBox(ctx, ox, oy, span * 0.9, height, colors);
-    const layout = { cols: span * 2, rows: Math.max(1, Math.round(height / 15)), insetU: 0.22, insetV: 0.24, skip: 7 };
-    dressBox(ctx, box, layout, colors, 5, lit);
+    // Civic buildings get the same grammar, drawn from a seed fixed by type so
+    // every police station in the city is recognisably the same building.
+    const rng = makeRng(hash2(type.length * 131, span * 17, 0x0c171c));
+    const style = facadeStyle(rng, spec.supply ? 'I' : 'C', 1, 1);
+    const plan = facadePlan(style, height, Math.hypot(box.w2, box.h2), spec.supply ? 'I' : 'C', type.length * 37);
+    dressBox(ctx, box, plan, colors, 5, lit);
     flatRoofDetail(ctx, box, colors, { tanks: 1 + (span % 2), antenna: false, seed: type.length * 37 + span });
     if (spec.supply) drawStacks(ctx, ox, oy, span, height, spec);
   }

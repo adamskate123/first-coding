@@ -8,7 +8,7 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
-Current version **0.10.0**, shown in the title bar. `VERSION` in
+Current version **0.11.0**, shown in the title bar. `VERSION` in
 `src/config.js` is the single source of truth — `package.json` carries the same
 number for tooling and a test asserts the two agree. Minor versions track
 feature releases; saves record the version that wrote them, though
@@ -224,6 +224,26 @@ two-storey buildings, pitched roofs never land on towers, and height stays
 within a jitter band of the level baseline so a building's size still reads as
 its development stage.
 
+**Facades are a grammar, not a grid.** A wall used to be a lattice: pick a
+column count and a row count and stamp identical rectangles across the whole
+thing. That reads as a barcode, and it was why sixteen variants of one zone
+came out looking like one building drawn sixteen times — measured, the only
+thing that differed between them was paint. A wall now *splits*: vertically
+into a ground storey, a repeating shaft and a cap; horizontally into bays; and
+each bay holds something the building's use calls for — a shopfront with a
+stall riser and fascia, a door, a window with a frame and occasionally the
+blinds down, a balcony, a louvre. Bay rhythm, storey height, cornice depth and
+detailing all vary per building and shift with wealth and period, so a rich
+building has a deeper cornice and a modern one has almost none.
+
+Everything in `facade.js` is pure geometry in pixels, with no canvas and no
+colour, which is what makes the dimensional faults testable: openings that
+overflow their bay, bands that do not add up to the wall, and the one that
+actually happened — sizing bays by tile span rather than by pixels, so a
+cottage covering most of a tile but only twenty-five pixels of wall got a
+single window the size of a garage door. It rendered perfectly and looked
+ridiculous.
+
 All building art is drawn procedurally as isometric volumes at load time and
 cached, so there are no image assets in the repository. The cache key is zone
 type x level x variant x wealth x era x lit — over ten thousand combinations —
@@ -255,6 +275,7 @@ src/
   render/
     renderer.js     the isometric renderer
     sprites.js      procedural building art
+    facade.js       the split grammar that organises a wall
     palette.js      colour
   ui/index.js       toolbar, readouts, inspector, advisors
 tests/              node --test, no DOM required
