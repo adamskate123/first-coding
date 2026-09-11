@@ -9,7 +9,7 @@
  * Minor versions track feature releases (bridges, wealth tiers, eras, relief);
  * the patch digit is for fixes and tuning.
  */
-export const VERSION = '0.6.0';
+export const VERSION = '0.6.1';
 
 /**
  * Central tuning constants.
@@ -26,6 +26,7 @@ export const TILE_W = 64;            // screen width of one tile's rhombus
 export const TILE_H = 32;            // screen height of one tile's rhombus
 export const ELEV_STEP = 7;          // pixels of lift per elevation unit
 export const SEA_LEVEL = 7;          // elevation at or below this is water
+export const MAX_ELEVATION = 30;     // ceiling on generated height
 
 // -------------------------------------------------------------------- time --
 

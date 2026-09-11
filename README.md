@@ -8,7 +8,7 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
-Current version **0.6.0**, shown in the title bar. `VERSION` in
+Current version **0.6.1**, shown in the title bar. `VERSION` in
 `src/config.js` is the single source of truth — `package.json` carries the same
 number for tooling and a test asserts the two agree. Minor versions track
 feature releases; saves record the version that wrote them, though
@@ -102,6 +102,10 @@ plane at sea level while the shore above it is not, so land drops a bank to
 meet it. Anything standing on a tile — buildings, trees, roads, lot surfaces —
 is anchored on the surface as drawn rather than on the plate the height map
 nominally describes, so a road rides a slope instead of stepping down it.
+
+Cursor picking reads the same `tileQuad` the renderer draws, and takes the
+frontmost tile whose surface contains the pointer — so what you click is what
+you see, including when a hill is drawn over the ground behind it.
 
 **Terrain** blends an fBm height field with a radial shore falloff and a carved
 river. The constants were tuned by sweeping them against explicit targets:
@@ -206,7 +210,7 @@ tests/              node --test, no DOM required
 npm test            # node --test tests/*.test.js
 ```
 
-132 tests covering the headless half of the game — everything under `src/sim`
+142 tests covering the headless half of the game — everything under `src/sim`
 plus the world model, projection maths, build tools and save format. They
 include regression tests for each bug found so far: the power model energising
 ungrounded wire, the growth oscillation, multi-tile buildings being repainted
