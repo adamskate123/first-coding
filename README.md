@@ -8,6 +8,13 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
+Current version **0.6.0**, shown in the title bar. `VERSION` in
+`src/config.js` is the single source of truth — `package.json` carries the same
+number for tooling and a test asserts the two agree. Minor versions track
+feature releases; saves record the version that wrote them, though
+compatibility is decided by the save `format`, not the version, so an older
+build's city still loads.
+
 ## Running it
 
 The game is plain ES modules with no build step and no dependencies, but
@@ -199,7 +206,7 @@ tests/              node --test, no DOM required
 npm test            # node --test tests/*.test.js
 ```
 
-125 tests covering the headless half of the game — everything under `src/sim`
+132 tests covering the headless half of the game — everything under `src/sim`
 plus the world model, projection maths, build tools and save format. They
 include regression tests for each bug found so far: the power model energising
 ungrounded wire, the growth oscillation, multi-tile buildings being repainted

@@ -1,4 +1,17 @@
 /**
+ * The game's version.
+ *
+ * This is the single source of truth: the interface reads it, and a save
+ * records the version that wrote it. `package.json` carries the same number
+ * for tooling, and a test asserts the two agree -- a version string that
+ * disagrees with itself is worse than none at all.
+ *
+ * Minor versions track feature releases (bridges, wealth tiers, eras, relief);
+ * the patch digit is for fixes and tuning.
+ */
+export const VERSION = '0.6.0';
+
+/**
  * Central tuning constants.
  *
  * Every balance knob the simulation reads lives here, so the city can be

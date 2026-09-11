@@ -7,7 +7,7 @@
  * those sweeps cache-friendly and cheap to serialise.
  */
 
-import { MAP_SIZE, SEA_LEVEL, T, Z, ZONE_INFO, ROAD, BUILDINGS, SERVICE_KEYS, START_FUNDS, START_YEAR, TAX_DEFAULT, eraFor } from './config.js';
+import { MAP_SIZE, SEA_LEVEL, T, Z, ZONE_INFO, ROAD, BUILDINGS, SERVICE_KEYS, START_FUNDS, START_YEAR, TAX_DEFAULT, VERSION, eraFor } from './config.js';
 import { fbm, clamp, lerp, hash2 } from './util.js';
 
 /**
@@ -62,6 +62,8 @@ export class World {
     this.buildings = [];   // { id, type, x, y, span, powered, on }
 
     // --- city-wide state --------------------------------------------------
+    /** Version that created this city; overwritten on load with the one that saved it. */
+    this.savedWith = VERSION;
     this.funds = START_FUNDS;
     this.tick = 0;
     this.month = 0;

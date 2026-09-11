@@ -9,7 +9,7 @@
  */
 
 import { World } from './world.js';
-import { SERVICE_KEYS } from './config.js';
+import { SERVICE_KEYS, VERSION } from './config.js';
 
 const SAVE_KEY = 'metropolis.save.v1';
 const FORMAT = 2;
@@ -35,6 +35,9 @@ function decode(b64, Type) {
 export function serialize(world) {
   return {
     format: FORMAT,
+    // Informational: `format` alone decides compatibility, but knowing which
+    // build wrote a city makes an odd-looking save far easier to explain.
+    version: VERSION,
     size: world.size,
     seed: world.seed,
     funds: world.funds,
@@ -80,6 +83,7 @@ export function deserialize(data) {
   world.year = data.year;
   world.tax = { ...data.tax };
   world.demand = { ...data.demand };
+  world.savedWith = data.version || null;
   world.log = data.log || [];
   world.history = data.history || [];
 

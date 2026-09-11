@@ -6,7 +6,7 @@
  * priced button on the palette with no other edits.
  */
 
-import { Z, ZONE_INFO, ROAD_INFO, ROAD, BUILDINGS, POWERLINE_COST, BULLDOZE_COST, SPEED_LABELS, TAX_MIN, TAX_MAX, SERVICE_KEYS, WEALTH_NAMES, ERAS } from '../config.js';
+import { Z, ZONE_INFO, ROAD_INFO, ROAD, BUILDINGS, POWERLINE_COST, BULLDOZE_COST, SPEED_LABELS, TAX_MIN, TAX_MAX, SERVICE_KEYS, WEALTH_NAMES, ERAS, VERSION } from '../config.js';
 import { TOOL } from '../tools.js';
 import { money, commas, clamp } from '../util.js';
 
@@ -16,6 +16,7 @@ export class UI {
   constructor(game) {
     this.game = game;
     this.selected = null;      // tile currently shown in the inspector
+    document.getElementById('version').textContent = `v${VERSION}`;
     this.buildToolbar();
     this.buildSpeeds();
     this.bindChrome();
