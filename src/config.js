@@ -127,8 +127,15 @@ export const BULLDOZE_COST = 4;
 export const BRIDGE_COST_MULTIPLIER = 8;
 export const BRIDGE_UPKEEP_MULTIPLIER = 4;
 export const POWERLINE_CROSSING_MULTIPLIER = 6;
-/** Elevation units the deck sits above the water surface. */
-export const BRIDGE_LIFT = 3;
+/**
+ * Least height a deck may sit above the water.
+ *
+ * A floor, not the height itself. A deck takes the level of the banks it
+ * joins, so a bridge spans *across* at road level instead of dipping down to
+ * the waterline and climbing back -- which is what a fixed lift produced
+ * everywhere the banks stood higher than it, which is almost everywhere.
+ */
+export const BRIDGE_CLEARANCE = 3;
 
 /** How far a tile may sit from a road and still be developable. */
 export const ROAD_REACH = 3;

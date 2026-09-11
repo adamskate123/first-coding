@@ -84,7 +84,9 @@ commercial districts emptying and rebuilding on a cycle forever.
 
 **Bridges** carry no state of their own: a road tile that sits on water *is* a
 bridge, and a power line on water is a crossing. Only price, upkeep and how it
-draws differ — the deck is lifted clear of the water and stood on piers. The
+draws differ — the deck is stood on piers at the level of the banks it joins,
+so the road spans across rather than dipping to the waterline and climbing
+back. The
 road network, traffic solver and power grid all treat a finished span as
 ordinary road, so a bridge becomes a bottleneck exactly the way a real one
 does.

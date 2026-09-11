@@ -54,6 +54,7 @@ export class World {
     this.powered = new Uint8Array(n);
     this.roadAccess = new Uint8Array(n);
     this.netId = new Int32Array(n).fill(-1);   // power network membership
+    this.deckHeight = new Float32Array(n);     // height a bridge deck sits at
     this.growthTimer = new Int8Array(n);       // hysteresis for grow/decay
     this.coverage = {};
     for (const k of SERVICE_KEYS) this.coverage[k] = new Uint8Array(n);

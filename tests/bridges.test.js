@@ -12,9 +12,10 @@ import assert from 'node:assert/strict';
 
 import { World } from '../src/world.js';
 import { T, Z, ROAD, ROAD_INFO, BRIDGE_COST_MULTIPLIER, BRIDGE_UPKEEP_MULTIPLIER,
-         POWERLINE_COST, POWERLINE_CROSSING_MULTIPLIER } from '../src/config.js';
+         POWERLINE_COST, POWERLINE_CROSSING_MULTIPLIER, SEA_LEVEL,
+         BRIDGE_CLEARANCE } from '../src/config.js';
 import { ToolController, TOOL } from '../src/tools.js';
-import { updateRoadAccess, updatePower } from '../src/sim/networks.js';
+import { updateRoadAccess, updatePower, updateBridgeDecks } from '../src/sim/networks.js';
 import { updateTraffic } from '../src/sim/traffic.js';
 import { monthlyBudget } from '../src/sim/economy.js';
 
@@ -242,4 +243,92 @@ test('water still refuses zoning and buildings', () => {
   tools.select('zone:R_LOW', 'R_LOW');
   tools.applyTiles([{ x: 14, y: 16 }]);
   assert.equal(w.zone[w.idx(14, 16)], Z.NONE, 'no zoning on water');
+});
+
+// ------------------------------------------------------- deck elevation ---
+
+test('a span sits at the level of the banks it joins', () => {
+  // A fixed lift above the water made the road dip down to cross and climb
+  // back, which is wrong nearly everywhere since banks stand above the
+  // waterline by more than the clearance.
+  const w = channelWorld();
+  const game = fakeGame(w);
+  dragRoad(game, 'STREET', { x: 10, y: 15 }, { x: 20, y: 15 });
+  updateBridgeDecks(w);
+
+  const bank = w.tileHeight(10, 15);
+  for (let x = 13; x <= 16; x++) {
+    assert.ok(Math.abs(w.deckHeight[w.idx(x, 15)] - bank) < 1e-6,
+      `deck at x=${x} sits at ${w.deckHeight[w.idx(x, 15)]}, the bank at ${bank}`);
+  }
+});
+
+test('a deck is level along its whole span', () => {
+  const w = channelWorld();
+  const game = fakeGame(w);
+  dragRoad(game, 'STREET', { x: 10, y: 15 }, { x: 20, y: 15 });
+  updateBridgeDecks(w);
+
+  const heights = new Set();
+  for (let x = 13; x <= 16; x++) heights.add(w.deckHeight[w.idx(x, 15)]);
+  assert.equal(heights.size, 1, `the deck steps: ${[...heights].join(', ')}`);
+});
+
+test('where the banks differ the deck takes the higher one', () => {
+  // Never below either approach, so a crossing is never a dip.
+  const w = channelWorld();
+  for (let y = 0; y < w.size; y++) {
+    for (let x = 17; x < w.size; x++) w.elevation[w.idx(x, y)] = 20;   // raise the east bank
+  }
+  w._corners = null;
+  const game = fakeGame(w);
+  dragRoad(game, 'STREET', { x: 10, y: 15 }, { x: 22, y: 15 });
+  updateBridgeDecks(w);
+
+  const west = w.tileHeight(10, 15), east = w.tileHeight(22, 15);
+  assert.ok(east > west, 'the test did not actually raise one bank');
+  assert.ok(w.deckHeight[w.idx(14, 15)] >= east - 1e-6, 'the deck dropped below the higher bank');
+});
+
+test('a deck never sits lower than its clearance above the water', () => {
+  const w = channelWorld();
+  // Drop both banks to just above the waterline.
+  for (let y = 0; y < w.size; y++) {
+    for (let x = 0; x < w.size; x++) {
+      if (w.terrain[w.idx(x, y)] !== T.WATER) w.elevation[w.idx(x, y)] = SEA_LEVEL + 1;
+    }
+  }
+  w._corners = null;
+  const game = fakeGame(w);
+  dragRoad(game, 'STREET', { x: 10, y: 15 }, { x: 20, y: 15 });
+  updateBridgeDecks(w);
+
+  assert.ok(w.deckHeight[w.idx(14, 15)] >= SEA_LEVEL + BRIDGE_CLEARANCE - 1e-6,
+    'the deck came down below its clearance');
+});
+
+test('two separate spans get their own heights', () => {
+  const w = channelWorld();
+  for (let y = 0; y < w.size; y++) {
+    for (let x = 17; x < w.size; x++) w.elevation[w.idx(x, y)] = 22;
+  }
+  w._corners = null;
+  const game = fakeGame(w);
+  dragRoad(game, 'STREET', { x: 10, y: 8 }, { x: 22, y: 8 });      // crosses to the high bank
+  dragRoad(game, 'STREET', { x: 10, y: 20 }, { x: 12, y: 20 });    // stays on the low bank
+  // A second crossing, low bank to low bank only, by bridging a lone column.
+  updateBridgeDecks(w);
+
+  const crossing = w.deckHeight[w.idx(14, 8)];
+  assert.ok(crossing > SEA_LEVEL + BRIDGE_CLEARANCE, 'the crossing did not take the bank height');
+  assert.equal(w.deckHeight[w.idx(14, 20)], 0, 'a tile with no span has no deck height');
+});
+
+test('land tiles never get a deck height', () => {
+  const w = channelWorld();
+  const game = fakeGame(w);
+  dragRoad(game, 'STREET', { x: 10, y: 15 }, { x: 20, y: 15 });
+  updateBridgeDecks(w);
+  assert.equal(w.deckHeight[w.idx(10, 15)], 0, 'road on dry land was given a deck');
+  assert.equal(w.deckHeight[w.idx(5, 5)], 0);
 });

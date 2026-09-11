@@ -12,7 +12,7 @@
  * they run over every tile on the map several times a second.
  */
 
-import { ROAD_REACH, BUILDINGS, BUILDING_POWER, ZONE_INFO } from '../config.js';
+import { ROAD_REACH, BUILDINGS, BUILDING_POWER, ZONE_INFO, T, SEA_LEVEL, BRIDGE_CLEARANCE } from '../config.js';
 
 /**
  * Flood outwards from every road tile and mark tiles within ROAD_REACH.
@@ -44,6 +44,100 @@ export function updateRoadAccess(world) {
 
   for (let i = 0; i < n; i++) world.roadAccess[i] = dist[i] <= ROAD_REACH ? 1 : 0;
   world.roadDist = dist;
+}
+
+/**
+ * How high each bridge deck sits.
+ *
+ * A span takes the level of the banks it joins rather than a fixed lift above
+ * the water, so the road crosses straight over instead of dipping down and
+ * climbing back. Every tile in a span shares one height, because a deck is
+ * level; where the two banks differ the higher one wins, so the crossing never
+ * drops below either approach.
+ *
+ * Derived from roads and terrain, so it is recomputed whenever the player
+ * changes either, alongside road access.
+ */
+const APPROACH_REACH = 3;
+
+/**
+ * The level of the road leading up to a crossing.
+ *
+ * Not simply the tile at the water's edge: corner smoothing already drags the
+ * shoreline down towards the waterline, so matching it would leave the road
+ * descending the bank before it ever reached the deck. Walking a few tiles
+ * inland along the road finds the level the road actually runs at.
+ */
+function approachHeight(world, start, reach) {
+  const s = world.size;
+  let best = world.tileHeight(start % s, (start / s) | 0);
+  let frontier = [start];
+  const seen = new Set([start]);
+
+  for (let step = 0; step < reach; step++) {
+    const next = [];
+    for (const i of frontier) {
+      const x = i % s, y = (i / s) | 0;
+      const around = [
+        x > 0 ? i - 1 : -1, x < s - 1 ? i + 1 : -1,
+        y > 0 ? i - s : -1, y < s - 1 ? i + s : -1,
+      ];
+      for (const j of around) {
+        if (j < 0 || seen.has(j)) continue;
+        if (world.road[j] === 0 || world.terrain[j] === T.WATER) continue;
+        seen.add(j);
+        next.push(j);
+        best = Math.max(best, world.tileHeight(j % s, (j / s) | 0));
+      }
+    }
+    frontier = next;
+  }
+  return best;
+}
+
+export function updateBridgeDecks(world) {
+  const s = world.size, n = s * s;
+  const deck = world.deckHeight;
+  const floor = SEA_LEVEL + BRIDGE_CLEARANCE;
+  deck.fill(0);
+
+  const onWater = (i) => world.road[i] !== 0 && world.terrain[i] === T.WATER;
+  const seen = world._deckSeen && world._deckSeen.length === n ? world._deckSeen : (world._deckSeen = new Uint8Array(n));
+  seen.fill(0);
+  const stack = [];
+  const span = [];
+
+  for (let start = 0; start < n; start++) {
+    if (seen[start] || !onWater(start)) continue;
+
+    // Flood this span, noting the height of every road tile on dry land that
+    // touches it -- those are its approaches.
+    let height = floor;
+    stack.length = 0;
+    span.length = 0;
+    stack.push(start);
+    seen[start] = 1;
+
+    while (stack.length) {
+      const i = stack.pop();
+      span.push(i);
+      const x = i % s, y = (i / s) | 0;
+      const neighbours = [
+        x > 0 ? i - 1 : -1, x < s - 1 ? i + 1 : -1,
+        y > 0 ? i - s : -1, y < s - 1 ? i + s : -1,
+      ];
+      for (const j of neighbours) {
+        if (j < 0) continue;
+        if (onWater(j)) {
+          if (!seen[j]) { seen[j] = 1; stack.push(j); }
+        } else if (world.road[j] !== 0) {
+          height = Math.max(height, approachHeight(world, j, APPROACH_REACH));
+        }
+      }
+    }
+
+    for (const i of span) deck[i] = height;
+  }
 }
 
 /** Does this tile carry power to its neighbours? */
