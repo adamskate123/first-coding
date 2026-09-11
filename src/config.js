@@ -88,6 +88,24 @@ export const POWERLINE_COST = 8;
 export const POWERLINE_UPKEEP = 0.4;
 export const BULLDOZE_COST = 4;
 
+/**
+ * Bridges and crossings.
+ *
+ * A bridge needs no state of its own: a road tile that happens to sit on water
+ * *is* a bridge, and a power line on water is a crossing. What changes is the
+ * price, the upkeep, and how it draws -- the deck is lifted clear of the water
+ * and stood on piers.
+ *
+ * Crossings are expensive on purpose. A river should be a decision, not a
+ * formality, and the traffic model already funnels a whole district's commute
+ * over whatever links the banks.
+ */
+export const BRIDGE_COST_MULTIPLIER = 8;
+export const BRIDGE_UPKEEP_MULTIPLIER = 4;
+export const POWERLINE_CROSSING_MULTIPLIER = 6;
+/** Elevation units the deck sits above the water surface. */
+export const BRIDGE_LIFT = 3;
+
 /** How far a tile may sit from a road and still be developable. */
 export const ROAD_REACH = 3;
 

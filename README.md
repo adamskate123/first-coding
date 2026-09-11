@@ -24,6 +24,11 @@ Then open <http://localhost:8000>. Any static file server works.
 Lay some **street**, zone beside it, then connect **power**. Nothing develops
 without all three: road access, power, and demand.
 
+To cross water, drag a road or power line from one bank to the other in a
+single gesture — a span has to reach both banks, so you cannot leave a pier
+stranded mid-river. Crossings cost eight times ordinary road and four times as
+much to maintain, which makes *where* you put them a real decision.
+
 | | |
 |---|---|
 | Left click / drag | Use the selected tool. Zones drag as a rectangle; roads and power lines follow an L-shaped run |
@@ -70,11 +75,20 @@ building up. Abandonment is deliberately far slower than growth and gated on a
 die roll — an earlier symmetric version oscillated violently, with whole
 commercial districts emptying and rebuilding on a cycle forever.
 
+**Bridges** carry no state of their own: a road tile that sits on water *is* a
+bridge, and a power line on water is a crossing. Only price, upkeep and how it
+draws differ — the deck is lifted clear of the water and stood on piers. The
+road network, traffic solver and power grid all treat a finished span as
+ordinary road, so a bridge becomes a bottleneck exactly the way a real one
+does.
+
 **Terrain** blends an fBm height field with a radial shore falloff and a carved
-inlet. The constants were tuned by sweeping them against three targets: about a
-quarter of the map under water, one contiguous landmass, and dry ground at the
-centre where the camera starts. `tests/terrain.test.js` asserts those hold
-across many seeds.
+river. The constants were tuned by sweeping them against explicit targets:
+about a quarter of the map under water, land resolving into at most two
+substantial banks rather than an archipelago, and dry ground at the centre
+where the camera starts. Roughly half of all seeds produce a river that
+genuinely splits the map — which is the point, now that you can bridge it.
+`tests/terrain.test.js` asserts those properties across many seeds.
 
 All building art is drawn procedurally as isometric volumes at load time and
 cached, so there are no image assets in the repository.
@@ -112,11 +126,15 @@ tests/              node --test, no DOM required
 npm test            # node --test tests/*.test.js
 ```
 
-The suite covers the headless half of the game — everything under `src/sim`
-plus the world model, projection maths and save format. It includes regression
-tests for each bug found so far: the power model energising ungrounded wire,
-the growth oscillation, multi-tile buildings being repainted by their own
-ground tiles, and advisors repeating themselves forever.
+61 tests covering the headless half of the game — everything under `src/sim`
+plus the world model, projection maths, build tools and save format. They
+include regression tests for each bug found so far: the power model energising
+ungrounded wire, the growth oscillation, multi-tile buildings being repainted
+by their own ground tiles, and advisors repeating themselves forever.
+
+`tests/bridges.test.js` drives the real `ToolController` against a stub game
+object, so span placement, pricing and refusal are tested through the same code
+path the mouse uses.
 
 ## Saving
 
@@ -127,24 +145,25 @@ changes to the balance tables.
 
 ## Known rough edges
 
-- Roads cannot cross water, so there are no bridges or tunnels yet. The map
-  generator works around this by tapering its inlet rather than cutting the
-  map in two.
+- No tunnels yet, so hills must be gone around rather than through.
+- Avenues carry more traffic than streets but draw at the same width.
 - Data overlays draw over buildings rather than flattening the city, so a
   dense district reads as muddy under an overlay.
 - Terrain cannot be edited; there is no landscaping tool.
 - No day/night cycle, weather, or seasons.
 
-## Where this could go next
+## Roadmap
 
-Roughly in order of how much each would add:
-
-1. **Bridges and tunnels**, which would unlock genuinely interesting geography.
-2. **Water and sewage** as a second utility network, reusing the power model.
-3. **Public transit** — bus routes and rail, sharing the commuter-flow solver.
-4. **Districts and policies**, the Cities: Skylines idea of painting an area
-   and applying rules to it.
-5. **Individual agent simulation** to replace aggregate commuter flow, so
-   citizens have homes, jobs and journeys you can follow.
-6. **Graphs and history**, using the monthly snapshots already recorded.
-7. **Larger maps with chunked terrain caching**, once redraw cost justifies it.
+- [x] **Bridges** — roads and power lines across water, priced as structures
+      and laid bank to bank. Rivers now run the full length of the map.
+- [ ] **Tunnels**, so hills can be crossed as well as rivers.
+- [ ] **Water and sewage** as a second utility network, reusing the power
+      model's per-network balancing.
+- [ ] **Public transit** — bus routes and rail, sharing the commuter-flow
+      solver that already exists.
+- [ ] **Districts and policies**: paint an area, apply rules to it.
+- [ ] **Individual agent simulation** to replace aggregate commuter flow, so
+      citizens have homes, jobs and journeys you can follow.
+- [ ] **Graphs and history**, using the monthly snapshots already recorded.
+- [ ] **Larger maps with chunked terrain caching**, once redraw cost justifies
+      it.

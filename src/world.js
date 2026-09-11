@@ -18,8 +18,8 @@ import { fbm, clamp, lerp, hash2 } from './util.js';
  */
 const SHORE_OFFSET = 1.25;      // radial distance at which land reaches sea level
 const SHORE_WIDTH = 0.50;       // how gradually the coast tapers
-const RIVER_HALF_WIDTH = 0.030; // inlet width, as a fraction of the map
-const RIVER_REACH = 0.60;       // how far down the map the inlet penetrates
+const RIVER_HALF_WIDTH = 0.032; // river width, as a fraction of the map
+const RIVER_REACH = 1.25;       // how far down the map the river runs
 
 export class World {
   constructor(size = MAP_SIZE, seed = 1) {
@@ -90,6 +90,26 @@ export class World {
     return this.terrain[this.idx(x, y)] === T.WATER;
   }
 
+  /** A road over water is a bridge. No separate state is needed. */
+  isBridge(x, y) {
+    if (!this.inBounds(x, y)) return false;
+    const i = this.idx(x, y);
+    return this.road[i] !== ROAD.NONE && this.terrain[i] === T.WATER;
+  }
+
+  /**
+   * Can a road or line laid here rest on something?
+   *
+   * Dry land supports anything. Water supports a crossing only where one is
+   * already built, which is what lets a span be extended without letting a
+   * player drop an isolated pier in the middle of a lake.
+   */
+  supportsCrossing(x, y) {
+    if (!this.inBounds(x, y)) return false;
+    const i = this.idx(x, y);
+    return this.terrain[i] !== T.WATER || this.road[i] !== ROAD.NONE || this.powerLine[i] === 1;
+  }
+
   /** Building instance occupying a tile, or null. */
   buildingAt(x, y) {
     if (!this.inBounds(x, y)) return null;
@@ -124,10 +144,12 @@ export class World {
         const r = Math.sqrt(cx * cx + cy * cy);
         h *= clamp((SHORE_OFFSET - r) / SHORE_WIDTH, 0, 1);
 
-        // An inlet wandering in from the north. It deliberately *fades out*
-        // partway down the map: roads cannot cross water yet, so a channel
-        // running the full height would permanently cut the road network in
-        // two. Tapering it keeps the waterfront without stranding half the map.
+        // A river wandering in from the north and running the length of the
+        // map. It used to fade out partway down, because a channel that cut
+        // the map in two would have stranded half of it -- now that bridges
+        // exist, a real river is the point: it forces the player to choose
+        // where the crossings go, and the traffic model funnels the commute
+        // over them.
         const wobble = (fbm(y / 22, 3.5, seed + 4242, 3, 0.5) - 0.5) * 0.62;
         const bank = Math.abs(nx - (0.5 + wobble));
         const reach = clamp((RIVER_REACH - ny) / 0.22, 0, 1);

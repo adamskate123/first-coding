@@ -10,7 +10,7 @@
  * there is no reason to burn a frame re-painting an unchanged skyline.
  */
 
-import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, BUILDINGS } from '../config.js';
+import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, BUILDINGS, SEA_LEVEL, BRIDGE_LIFT } from '../config.js';
 import { tileToWorld } from '../iso.js';
 import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, heatColor, shade } from './palette.js';
 import { zoneSprite, buildingSprite, treeSprite } from './sprites.js';
@@ -103,7 +103,10 @@ export class Renderer {
     }
 
     // --- what the player put there ----------------------------------------
-    if (w.road[i]) this.drawRoad(x, y, i, p);
+    if (w.road[i]) {
+      if (terrain === T.WATER) this.drawBridge(x, y, i);
+      else this.drawRoad(x, y, i, p);
+    }
 
     const zone = w.zone[i];
     if (zone !== Z.NONE && w.level[i] === 0) this.drawZoneTint(p, zone, w.roadAccess[i]);
@@ -232,6 +235,66 @@ export class Renderer {
     }
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+
+  /**
+   * A bridge: the same road surface, lifted clear of the water and stood on
+   * piers, with railings along any edge that does not meet another road.
+   *
+   * Everything is drawn inside the tile's own footprint, so the diagonal sweep
+   * still paints it in the right order -- the piers stop at the waterline
+   * rather than hanging down into the tile in front.
+   */
+  drawBridge(x, y, i) {
+    const ctx = this.ctx;
+    const w = this.world;
+    const deck = tileToWorld(x, y, SEA_LEVEL + BRIDGE_LIFT);
+    const lift = BRIDGE_LIFT * ELEV_STEP;
+
+    // piers dropping to the waterline
+    ctx.fillStyle = '#544f46';
+    const cx = deck.x, cy = deck.y + TILE_H / 2;
+    ctx.fillRect(cx - 9, cy, 4, lift + 3);
+    ctx.fillRect(cx + 5, cy, 4, lift + 3);
+
+    // the deck's own thickness, along the two edges facing the viewer
+    const THICK = 4;
+    ctx.fillStyle = '#443f39';
+    ctx.beginPath();
+    ctx.moveTo(deck.x - TILE_W / 2, deck.y + TILE_H / 2);
+    ctx.lineTo(deck.x, deck.y + TILE_H);
+    ctx.lineTo(deck.x + TILE_W / 2, deck.y + TILE_H / 2);
+    ctx.lineTo(deck.x + TILE_W / 2, deck.y + TILE_H / 2 + THICK);
+    ctx.lineTo(deck.x, deck.y + TILE_H + THICK);
+    ctx.lineTo(deck.x - TILE_W / 2, deck.y + TILE_H / 2 + THICK);
+    ctx.closePath();
+    ctx.fill();
+
+    this.drawRoad(x, y, i, deck);
+
+    // Railings close off the open sides, so a span reads as a bridge rather
+    // than as road that happens to be floating.
+    const T_ = { x: deck.x, y: deck.y };
+    const R_ = { x: deck.x + TILE_W / 2, y: deck.y + TILE_H / 2 };
+    const B_ = { x: deck.x, y: deck.y + TILE_H };
+    const L_ = { x: deck.x - TILE_W / 2, y: deck.y + TILE_H / 2 };
+    const edges = [
+      [x + 1, y, R_, B_], [x - 1, y, T_, L_],
+      [x, y + 1, L_, B_], [x, y - 1, T_, R_],
+    ];
+    const RAIL_H = 6;
+    ctx.strokeStyle = '#a49d8e';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (const [nx, ny, a, b] of edges) {
+      if (w.inBounds(nx, ny) && w.road[w.idx(nx, ny)]) continue;
+      ctx.moveTo(a.x, a.y - RAIL_H);
+      ctx.lineTo(b.x, b.y - RAIL_H);
+      // posts at the ends, so a long run reads as railing rather than a stripe
+      ctx.moveTo(a.x, a.y - RAIL_H); ctx.lineTo(a.x, a.y);
+      ctx.moveTo(b.x, b.y - RAIL_H); ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
   }
 
   drawPowerLine(x, y, i, p) {

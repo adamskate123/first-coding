@@ -7,7 +7,8 @@
  * built -- which is what eventually punishes sprawl.
  */
 
-import { ROAD_INFO, POWERLINE_UPKEEP, BUILDINGS, TAX_PER_RESIDENT, TAX_PER_JOB, Z } from '../config.js';
+import { ROAD_INFO, POWERLINE_UPKEEP, BUILDINGS, TAX_PER_RESIDENT, TAX_PER_JOB, Z, T,
+         BRIDGE_UPKEEP_MULTIPLIER, POWERLINE_CROSSING_MULTIPLIER } from '../config.js';
 import { clamp } from '../util.js';
 
 export function monthlyBudget(world) {
@@ -35,8 +36,14 @@ export function monthlyBudget(world) {
   // --- upkeep --------------------------------------------------------------
   let roadCost = 0, lineCost = 0, serviceCost = 0;
   for (let i = 0; i < n; i++) {
-    if (world.road[i]) roadCost += ROAD_INFO[world.road[i]].upkeep;
-    if (world.powerLine[i]) lineCost += POWERLINE_UPKEEP;
+    // Spans over water cost more to keep standing than road laid on soil.
+    const overWater = world.terrain[i] === T.WATER;
+    if (world.road[i]) {
+      roadCost += ROAD_INFO[world.road[i]].upkeep * (overWater ? BRIDGE_UPKEEP_MULTIPLIER : 1);
+    }
+    if (world.powerLine[i]) {
+      lineCost += POWERLINE_UPKEEP * (overWater ? POWERLINE_CROSSING_MULTIPLIER : 1);
+    }
   }
   for (const b of world.activeBuildings()) {
     if (b.on) serviceCost += BUILDINGS[b.type].upkeep;

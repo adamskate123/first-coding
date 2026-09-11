@@ -8,7 +8,8 @@
  * ground will not take them.
  */
 
-import { Z, ZONE_INFO, ROAD, ROAD_INFO, POWERLINE_COST, BULLDOZE_COST, BUILDINGS, T } from './config.js';
+import { Z, ZONE_INFO, ROAD, ROAD_INFO, POWERLINE_COST, BULLDOZE_COST, BUILDINGS, T,
+         BRIDGE_COST_MULTIPLIER, POWERLINE_CROSSING_MULTIPLIER } from './config.js';
 
 export const TOOL = {
   SELECT: 'select',
@@ -97,9 +98,29 @@ export class ToolController {
     const tiles = this.affectedTiles();
     r.preview = tiles;
     const cost = this.costOf(tiles);
-    r.previewValid = cost <= this.game.world.funds && tiles.length > 0;
     this.previewCost = cost;
+    this.previewAnchored = this.crossingIsAnchored(tiles);
+    r.previewValid = tiles.length > 0 && cost <= this.game.world.funds && this.previewAnchored;
     r.markDirty();
+  }
+
+  /**
+   * A span over water has to reach both banks.
+   *
+   * Without this a player could drop a lone road tile in the middle of a lake.
+   * Requiring both ends of the run to rest on something -- dry land, or a
+   * crossing already built -- means a bridge is always laid bank to bank, and
+   * an existing span can still be widened or extended from either end.
+   */
+  crossingIsAnchored(tiles) {
+    if (!tiles.length) return true;
+    const w = this.game.world;
+    const isCrossingTool = this.tool.startsWith('road:') || this.tool === TOOL.POWERLINE;
+    if (!isCrossingTool) return true;
+    if (!tiles.some((t) => w.isWater(t.x, t.y))) return true;
+
+    const first = tiles[0], last = tiles[tiles.length - 1];
+    return w.supportsCrossing(first.x, first.y) && w.supportsCrossing(last.x, last.y);
   }
 
   /** Tiles the current gesture would touch. */
@@ -157,9 +178,15 @@ export class ToolController {
         if (w.terrain[i] !== T.WATER && w.build[i] === -1 && w.road[i] === 0 && w.zone[i] !== z) total += ZONE_INFO[z].cost;
       } else if (this.tool.startsWith('road:')) {
         const kind = ROAD[this.arg];
-        if (w.terrain[i] !== T.WATER && w.build[i] === -1 && w.road[i] !== kind) total += ROAD_INFO[kind].cost;
+        if (w.build[i] === -1 && w.road[i] !== kind) {
+          const overWater = w.terrain[i] === T.WATER;
+          total += ROAD_INFO[kind].cost * (overWater ? BRIDGE_COST_MULTIPLIER : 1);
+        }
       } else if (this.tool === TOOL.POWERLINE) {
-        if (w.terrain[i] !== T.WATER && w.build[i] === -1 && !w.powerLine[i]) total += POWERLINE_COST;
+        if (w.build[i] === -1 && !w.powerLine[i]) {
+          const overWater = w.terrain[i] === T.WATER;
+          total += POWERLINE_COST * (overWater ? POWERLINE_CROSSING_MULTIPLIER : 1);
+        }
       } else if (this.tool.startsWith('build:')) {
         return BUILDINGS[this.arg].cost;
       }
@@ -174,6 +201,10 @@ export class ToolController {
     const cost = this.costOf(tiles);
     if (cost > w.funds) {
       this.game.toast('Not enough funds.');
+      return;
+    }
+    if (!this.crossingIsAnchored(tiles)) {
+      this.game.toast('A crossing must reach both banks.');
       return;
     }
 
@@ -194,14 +225,14 @@ export class ToolController {
         }
       } else if (this.tool.startsWith('road:')) {
         const kind = ROAD[this.arg];
-        if (w.terrain[i] === T.WATER || w.build[i] !== -1) continue;
+        if (w.build[i] !== -1) continue;
         if (w.road[i] !== kind) {
           w.road[i] = kind;
           w.zone[i] = Z.NONE; w.level[i] = 0; w.pop[i] = 0; w.jobs[i] = 0; w.tree[i] = 0;
           changed = true;
         }
       } else if (this.tool === TOOL.POWERLINE) {
-        if (w.terrain[i] === T.WATER || w.build[i] !== -1) continue;
+        if (w.build[i] !== -1) continue;
         if (!w.powerLine[i]) { w.powerLine[i] = 1; w.tree[i] = 0; changed = true; }
       }
     }

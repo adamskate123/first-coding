@@ -16,36 +16,46 @@ import { T, MAP_SIZE } from '../src/config.js';
 
 const SEEDS = Array.from({ length: 12 }, (_, k) => k * 7919 + 13);
 
+/**
+ * Label every contiguous region of dry land and report their sizes as shares
+ * of all dry land, largest first, plus which region the map's centre sits in.
+ */
 function survey(world) {
   const n = world.terrain.length;
   const size = world.size;
   let water = 0;
   for (let i = 0; i < n; i++) if (world.terrain[i] === T.WATER) water++;
 
-  // Largest contiguous run of dry land, as a share of all dry land.
-  const seen = new Uint8Array(n);
+  const region = new Int32Array(n).fill(-1);
+  const sizes = [];
   const stack = [];
-  let biggest = 0;
   for (let i = 0; i < n; i++) {
-    if (seen[i] || world.terrain[i] === T.WATER) continue;
+    if (region[i] !== -1 || world.terrain[i] === T.WATER) continue;
+    const id = sizes.length;
     let count = 0;
     stack.length = 0;
     stack.push(i);
-    seen[i] = 1;
+    region[i] = id;
     while (stack.length) {
       const j = stack.pop();
       count++;
       const x = j % size, y = (j / size) | 0;
-      if (x > 0 && !seen[j - 1] && world.terrain[j - 1] !== T.WATER) { seen[j - 1] = 1; stack.push(j - 1); }
-      if (x < size - 1 && !seen[j + 1] && world.terrain[j + 1] !== T.WATER) { seen[j + 1] = 1; stack.push(j + 1); }
-      if (y > 0 && !seen[j - size] && world.terrain[j - size] !== T.WATER) { seen[j - size] = 1; stack.push(j - size); }
-      if (y < size - 1 && !seen[j + size] && world.terrain[j + size] !== T.WATER) { seen[j + size] = 1; stack.push(j + size); }
+      if (x > 0 && region[j - 1] === -1 && world.terrain[j - 1] !== T.WATER) { region[j - 1] = id; stack.push(j - 1); }
+      if (x < size - 1 && region[j + 1] === -1 && world.terrain[j + 1] !== T.WATER) { region[j + 1] = id; stack.push(j + 1); }
+      if (y > 0 && region[j - size] === -1 && world.terrain[j - size] !== T.WATER) { region[j - size] = id; stack.push(j - size); }
+      if (y < size - 1 && region[j + size] === -1 && world.terrain[j + size] !== T.WATER) { region[j + size] = id; stack.push(j + size); }
     }
-    if (count > biggest) biggest = count;
+    sizes.push(count);
   }
 
   const land = n - water;
-  return { waterShare: water / n, landmassShare: land ? biggest / land : 0 };
+  const mid = size >> 1;
+  const centreRegion = region[mid * size + mid];
+  return {
+    waterShare: water / n,
+    shares: sizes.map((c) => c / land).sort((a, b) => b - a),
+    centreShare: centreRegion === -1 ? 0 : sizes[centreRegion] / land,
+  };
 }
 
 test('every generated map has a meaningful amount of water', () => {
@@ -56,12 +66,31 @@ test('every generated map has a meaningful amount of water', () => {
   }
 });
 
-test('dry land forms one contiguous mass, not an archipelago', () => {
-  // Roads cannot cross water, so a fragmented map would strand the player.
+test('the river may split the map, but only into banks worth building on', () => {
+  // Since bridges exist, a river that cuts the map in two is a feature rather
+  // than a trap. What must not happen is the map shattering into islets: land
+  // should resolve into at most two substantial banks that between them hold
+  // nearly all the dry ground.
   for (const seed of SEEDS) {
-    const { landmassShare } = survey(new World(MAP_SIZE, seed));
-    assert.ok(landmassShare > 0.85,
-      `seed ${seed}: largest landmass is only ${(landmassShare * 100).toFixed(1)}% of dry land`);
+    const { shares } = survey(new World(MAP_SIZE, seed));
+    const major = shares.filter((s) => s > 0.03);
+
+    assert.ok(major.length <= 2,
+      `seed ${seed}: land broke into ${major.length} major regions`);
+    assert.ok(major[0] >= 0.40,
+      `seed ${seed}: the largest bank is only ${(major[0] * 100).toFixed(1)}% of dry land`);
+
+    const accounted = major.reduce((a, b) => a + b, 0);
+    assert.ok(accounted > 0.95,
+      `seed ${seed}: only ${(accounted * 100).toFixed(1)}% of land is in a usable bank`);
+  }
+});
+
+test('the player never starts on a sliver of land', () => {
+  for (const seed of SEEDS) {
+    const { centreShare } = survey(new World(MAP_SIZE, seed));
+    assert.ok(centreShare > 0.30,
+      `seed ${seed}: the camera starts on a region holding only ${(centreShare * 100).toFixed(1)}% of land`);
   }
 });
 
