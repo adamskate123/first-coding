@@ -6,6 +6,12 @@
  * rasterised once into an offscreen canvas and cached by shape, so the cost is
  * paid on the frame a building first appears and never again.
  *
+ * A lot's appearance comes from a *recipe*: a deterministic spec derived from
+ * its variant number, choosing massing, roof form, height, window treatment and
+ * details. The recipe is a pure function, so it can be tested without a canvas
+ * and a given lot looks the same for the life of the city without storing
+ * anything about how it was drawn.
+ *
  * Geometry convention: a tile's *origin* is the top corner of its rhombus. A
  * span-N footprint is a rhombus N*TILE_W wide and N*TILE_H tall, centred
  * horizontally on that origin:
@@ -19,12 +25,15 @@
 
 import { TILE_W, TILE_H, BUILDINGS } from '../config.js';
 import { BUILDING_PALETTES, TREE_COLORS, FACE, shade } from './palette.js';
-import { hash2 } from '../util.js';
+import { hash2, makeRng, clamp } from '../util.js';
 
 const cache = new Map();
-const PAD = 8;
+const PAD = 10;
 
-/** Building heights in pixels, indexed by development level. */
+/** Distinct designs available per zone type and level. */
+export const VARIANTS = 16;
+
+/** Baseline wall height in pixels, by development level. */
 const ZONE_HEIGHTS = {
   R_LOW: [0, 13, 17, 22],
   R_HIGH: [0, 24, 42, 70, 108],
@@ -34,14 +43,117 @@ const ZONE_HEIGHTS = {
   I_HEAVY: [0, 25, 34, 47],
 };
 
+/**
+ * The vocabulary each zone type draws from.
+ *
+ * Repeats in a pool are weights: listing 'single' twice makes plain blocks
+ * twice as likely as any one alternative, which keeps a street coherent while
+ * still varying it. `footprint` is how much of the lot the building covers --
+ * houses sit back from the line, towers fill it.
+ */
+const STYLES = {
+  R_LOW: {
+    roofs: ['hip', 'gable', 'gable', 'hip'],
+    massing: ['single', 'single', 'twin', 'ell'],
+    windows: ['grid', 'grid', 'sparse'],
+    footprint: [0.66, 0.82], jitter: 0.24, chimney: 0.75,
+  },
+  R_HIGH: {
+    roofs: ['flat', 'flat', 'flat', 'gable'],
+    massing: ['single', 'single', 'setback', 'ell'],
+    windows: ['grid', 'grid', 'columns'],
+    footprint: [0.82, 0.95], jitter: 0.20, chimney: 0.15,
+  },
+  C_LOW: {
+    roofs: ['flat', 'flat', 'gable'],
+    massing: ['single', 'single', 'ell'],
+    windows: ['ribbon', 'ribbon', 'grid'],
+    footprint: [0.80, 0.94], jitter: 0.18, chimney: 0, awning: 0.65,
+  },
+  C_HIGH: {
+    roofs: ['flat'],
+    massing: ['single', 'setback', 'podium', 'single'],
+    windows: ['ribbon', 'columns', 'grid'],
+    footprint: [0.84, 0.96], jitter: 0.22, chimney: 0, awning: 0.3,
+  },
+  I_LIGHT: {
+    roofs: ['flat', 'flat', 'gable'],
+    massing: ['single', 'single', 'ell'],
+    windows: ['sparse'],
+    footprint: [0.80, 0.94], jitter: 0.16, chimney: 0,
+  },
+  I_HEAVY: {
+    roofs: ['flat'],
+    massing: ['single', 'single', 'twin', 'ell'],
+    windows: ['sparse'],
+    footprint: [0.84, 0.96], jitter: 0.16, chimney: 0,
+  },
+};
+
+/** Stacked forms need enough height to be legible as stacked. */
+const STACK_MIN_HEIGHT = 44;
+
+/**
+ * Derive a lot's design from its variant number.
+ *
+ * Pure and deterministic: the same arguments always give the same building, so
+ * nothing about appearance needs storing or saving.
+ */
+export function buildingRecipe(zoneKey, level, variant) {
+  const style = STYLES[zoneKey];
+  const heights = ZONE_HEIGHTS[zoneKey];
+  if (!style || !heights) return null;
+
+  const capped = Math.min(level, heights.length - 1);
+  const base = heights[capped];
+  const rng = makeRng(hash2(variant * 131 + capped, zoneKey.length * 37 + capped, 0x9e3779b9));
+  const pick = (pool) => pool[Math.min(pool.length - 1, Math.floor(rng() * pool.length))];
+
+  const height = Math.max(6, Math.round(base * (1 + (rng() * 2 - 1) * style.jitter)));
+  const footprint = style.footprint[0] + rng() * (style.footprint[1] - style.footprint[0]);
+
+  let massing = pick(style.massing);
+  // A setback or podium on a two-storey building just looks like a mistake.
+  if ((massing === 'setback' || massing === 'podium') && height < STACK_MIN_HEIGHT) {
+    massing = 'single';
+  }
+
+  let roof = pick(style.roofs);
+  // Pitched roofs belong on single masses of modest height; on a stacked tower
+  // they read as a hat.
+  const stacked = massing === 'setback' || massing === 'podium';
+  if (stacked || height > 60) roof = 'flat';
+
+  const pitched = roof !== 'flat';
+
+  return {
+    palette: Math.floor(rng() * BUILDING_PALETTES[zoneKey].length),
+    height,
+    footprint,
+    massing,
+    roof,
+    roofRise: 0.38 + rng() * 0.3,
+    windows: pick(style.windows),
+    chimney: pitched && rng() < (style.chimney ?? 0),
+    antenna: !pitched && height > 72 && rng() < 0.55,
+    tanks: pitched ? 0 : Math.floor(rng() * 3),
+    awning: !!style.awning && rng() < style.awning,
+    seed: hash2(variant, capped, 0x51ed),
+  };
+}
+
 function makeCanvas(w, h) {
-  const c = typeof OffscreenCanvas !== 'undefined'
+  return typeof OffscreenCanvas !== 'undefined'
     ? new OffscreenCanvas(w, h)
     : Object.assign(document.createElement('canvas'), { width: w, height: h });
-  return c;
 }
 
 // ------------------------------------------------------------- primitives --
+
+/** Offset in screen pixels for a displacement of (u, v) tiles. */
+function isoOffset(u, v) {
+  return { x: (u - v) * (TILE_W / 2), y: (u + v) * (TILE_H / 2) };
+}
 
 /** Trace the rhombus of a span-N footprint, lifted by `lift` pixels. */
 function rhombus(ctx, ox, oy, span, lift = 0) {
@@ -56,8 +168,8 @@ function rhombus(ctx, ox, oy, span, lift = 0) {
 }
 
 /**
- * A solid isometric box: roof, front-left face, front-right face.
- * Returns the geometry so callers can decorate the faces.
+ * A solid isometric box: roof slab, front-left face, front-right face.
+ * Returns its geometry so callers can decorate the faces.
  */
 function isoBox(ctx, ox, oy, span, height, colors) {
   const w2 = (span * TILE_W) / 2;
@@ -66,7 +178,6 @@ function isoBox(ctx, ox, oy, span, height, colors) {
   const left = { x: ox - w2, y: oy + h2 };
   const right = { x: ox + w2, y: oy + h2 };
 
-  // front-left face
   ctx.fillStyle = shade(colors.wall, FACE.left);
   ctx.beginPath();
   ctx.moveTo(left.x, left.y);
@@ -76,7 +187,6 @@ function isoBox(ctx, ox, oy, span, height, colors) {
   ctx.closePath();
   ctx.fill();
 
-  // front-right face
   ctx.fillStyle = shade(colors.wall, FACE.right);
   ctx.beginPath();
   ctx.moveTo(bottom.x, bottom.y);
@@ -86,29 +196,41 @@ function isoBox(ctx, ox, oy, span, height, colors) {
   ctx.closePath();
   ctx.fill();
 
-  // roof
   ctx.fillStyle = colors.roof;
   rhombus(ctx, ox, oy, span, height);
   ctx.fill();
 
-  return { bottom, left, right, w2, h2, height };
+  return { ox, oy, span, bottom, left, right, w2, h2, height };
+}
+
+/** Window layout parameters for each treatment. */
+function windowLayout(style, height, span) {
+  const floors = Math.max(1, Math.round(height / 13));
+  switch (style) {
+    case 'ribbon':   return { cols: 1, rows: floors, insetU: 0.06, insetV: 0.30, skip: 0 };
+    case 'columns':  return { cols: Math.max(2, Math.round(span * 4)), rows: 1, insetU: 0.28, insetV: 0.05, skip: 0 };
+    case 'sparse':   return { cols: Math.max(1, Math.round(span * 2)), rows: Math.max(1, Math.round(floors / 2)), insetU: 0.30, insetV: 0.32, skip: 3 };
+    default:         return { cols: Math.max(1, Math.round(span * 3)), rows: floors, insetU: 0.22, insetV: 0.24, skip: 7 };
+  }
 }
 
 /**
- * Lay a grid of windows across one face.
- * `anchor` is the face's lower corner, `du` the vector along its base.
+ * Lay windows across one face. `anchor` is the face's lower corner and `du`
+ * the vector along its base.
  */
-function windows(ctx, anchor, du, height, cols, rows, color, seedBase, lit) {
+function windows(ctx, anchor, du, height, layout, color, seedBase, lit) {
+  const { cols, rows, insetU, insetV, skip } = layout;
   if (cols < 1 || rows < 1 || height < 8) return;
+
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      // Leave a scattering of windows dark so facades aren't uniform.
       const h = hash2(c, r, seedBase);
-      if ((h & 7) === 0) continue;
+      // A scattering of dark windows keeps facades from looking printed.
+      if (skip > 0 && (h & skip) === 0) continue;
       const on = lit && (h & 3) !== 0;
 
-      const u0 = (c + 0.22) / cols, u1 = (c + 0.78) / cols;
-      const v0 = height * ((r + 0.24) / rows), v1 = height * ((r + 0.76) / rows);
+      const u0 = (c + insetU) / cols, u1 = (c + 1 - insetU) / cols;
+      const v0 = height * ((r + insetV) / rows), v1 = height * ((r + 1 - insetV) / rows);
       ctx.fillStyle = on ? shade(color, 1.35) : shade(color, 0.75);
       ctx.beginPath();
       ctx.moveTo(anchor.x + du.x * u0, anchor.y + du.y * u0 - v0);
@@ -120,6 +242,13 @@ function windows(ctx, anchor, du, height, cols, rows, color, seedBase, lit) {
     }
   }
 }
+
+function dressBox(ctx, box, layout, colors, seed, lit) {
+  windows(ctx, box.left, { x: box.w2, y: box.h2 }, box.height, layout, colors.win, seed, lit);
+  windows(ctx, box.bottom, { x: box.w2, y: -box.h2 }, box.height, layout, colors.win, seed + 91, lit);
+}
+
+// ------------------------------------------------------------------ roofs --
 
 /** Hipped roof: four triangles meeting at a central apex. */
 function hipRoof(ctx, ox, oy, span, lift, rise, color) {
@@ -137,10 +266,174 @@ function hipRoof(ctx, ox, oy, span, lift, rise, color) {
     ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(apex.x, apex.y);
     ctx.closePath(); ctx.fill();
   };
-  face(left, top, 0.9);      // back-left
-  face(top, right, 0.78);    // back-right
-  face(left, bottom, 1.06);  // front-left, catches the light
-  face(bottom, right, 0.7);  // front-right
+  face(left, top, 0.9);
+  face(top, right, 0.78);
+  face(left, bottom, 1.06);
+  face(bottom, right, 0.7);
+}
+
+/** Gabled roof: two slopes meeting at a ridge, with a triangular end wall. */
+function gableRoof(ctx, ox, oy, span, lift, rise, color, wall) {
+  const w2 = (span * TILE_W) / 2;
+  const h2 = (span * TILE_H) / 2;
+  const top = { x: ox, y: oy - lift };
+  const right = { x: ox + w2, y: oy + h2 - lift };
+  const bottom = { x: ox, y: oy + h2 * 2 - lift };
+  const left = { x: ox - w2, y: oy + h2 - lift };
+  // Ridge runs from the midpoint of one pair of edges to the other.
+  const ridgeA = { x: ox - w2 / 2, y: oy + h2 / 2 - lift - rise };
+  const ridgeB = { x: ox + w2 / 2, y: oy + h2 * 1.5 - lift - rise };
+
+  // Gable end walls first; the slopes overlap their upper edges.
+  ctx.fillStyle = shade(wall, 0.86);
+  ctx.beginPath();
+  ctx.moveTo(top.x, top.y); ctx.lineTo(left.x, left.y); ctx.lineTo(ridgeA.x, ridgeA.y);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = shade(wall, 0.64);
+  ctx.beginPath();
+  ctx.moveTo(right.x, right.y); ctx.lineTo(bottom.x, bottom.y); ctx.lineTo(ridgeB.x, ridgeB.y);
+  ctx.closePath(); ctx.fill();
+
+  const plane = (a, b, tint) => {
+    ctx.fillStyle = shade(color, tint);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    ctx.lineTo(ridgeB.x, ridgeB.y); ctx.lineTo(ridgeA.x, ridgeA.y);
+    ctx.closePath(); ctx.fill();
+  };
+  plane(top, right, 0.74);     // far slope
+  plane(left, bottom, 1.05);   // near slope, catching the light
+}
+
+/** Parapet, stair housings and vents -- what sells a flat roof. */
+function flatRoofDetail(ctx, box, colors, rec) {
+  const { ox, oy, span, height } = box;
+  ctx.strokeStyle = shade(colors.roof, 0.72);
+  ctx.lineWidth = 1.5;
+  rhombus(ctx, ox, oy, span, height);
+  ctx.stroke();
+
+  const w2 = (span * TILE_W) / 2;
+  const h2 = (span * TILE_H) / 2;
+  for (let k = 0; k < rec.tanks; k++) {
+    const hx = hash2(k, rec.seed, 17) / 4294967296;
+    const hy = hash2(k, rec.seed, 29) / 4294967296;
+    const u = (hx - 0.5) * 1.1, v = (hy - 0.5) * 1.1;
+    if (Math.abs(u) + Math.abs(v) > 0.62) continue;
+    const cx = ox + (u + v) * w2;
+    const cy = oy + h2 - height + (u - v) * h2;
+    const bh = 3 + (rec.seed >> (k * 3)) % 6;
+    isoBox(ctx, cx, cy - h2 * 0.18, span * 0.22, bh, { wall: colors.roof, roof: shade(colors.roof, 1.12) });
+  }
+
+  if (rec.antenna) {
+    const mastH = 12 + (rec.seed % 10);
+    const cx = ox, cy = oy + h2 - height;
+    ctx.strokeStyle = '#4d4a44';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy); ctx.lineTo(cx, cy - mastH);
+    ctx.stroke();
+    ctx.fillStyle = '#c2554a';
+    ctx.fillRect(cx - 1, cy - mastH - 2, 2, 2);
+  }
+}
+
+/**
+ * A chimney poking out of a pitched roof.
+ *
+ * Kept short and brick-coloured on purpose: a tall dark one reads as an
+ * industrial smokestack and pulls the eye straight off the houses.
+ */
+function chimney(ctx, box, colors, rec) {
+  const { ox, oy, span, height } = box;
+  const h2 = (span * TILE_H) / 2;
+  const side = (rec.seed & 1) ? 0.2 : -0.2;
+  const cx = ox + side * (span * TILE_W) / 2;
+  const cy = oy + h2 - height + side * h2 * 0.5;
+  const stackH = 5 + (rec.seed % 4);
+  isoBox(ctx, cx, cy, span * 0.14, stackH, {
+    wall: shade(colors.roof, 1.12), roof: shade(colors.roof, 0.7),
+  });
+}
+
+/** A shop canopy along the two street-facing edges. */
+function awning(ctx, box, colors) {
+  const { bottom, left, right } = box;
+  const drop = 5;
+  ctx.fillStyle = shade(colors.roof, 1.18);
+  ctx.beginPath();
+  ctx.moveTo(left.x, left.y - drop - 3);
+  ctx.lineTo(bottom.x, bottom.y - drop - 3);
+  ctx.lineTo(bottom.x, bottom.y - drop);
+  ctx.lineTo(left.x, left.y - drop);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = shade(colors.roof, 0.95);
+  ctx.beginPath();
+  ctx.moveTo(bottom.x, bottom.y - drop - 3);
+  ctx.lineTo(right.x, right.y - drop - 3);
+  ctx.lineTo(right.x, right.y - drop);
+  ctx.lineTo(bottom.x, bottom.y - drop);
+  ctx.closePath(); ctx.fill();
+}
+
+// ---------------------------------------------------------------- massing --
+
+/**
+ * Break a recipe into the boxes that make up the building.
+ *
+ * Each part carries its offset within the lot (in tiles), its span, its wall
+ * height, how far it is lifted off the ground, and whether it is the mass that
+ * gets the roof.
+ */
+export function massingParts(rec) {
+  const f = rec.footprint;
+  const h = rec.height;
+  const c = (1 - f) / 2;         // inset that centres the footprint in the lot
+
+  switch (rec.massing) {
+    case 'twin': {
+      const s = f * 0.46;
+      const gap = f - s;
+      return [
+        { u: c, v: c, s, h, lift: 0, roofed: true },
+        { u: c + gap, v: c, s, h: Math.round(h * 0.88), lift: 0, roofed: true },
+      ];
+    }
+    case 'ell': {
+      const main = f * 0.70;
+      const wing = f * 0.42;
+      return [
+        { u: c, v: c, s: main, h, lift: 0, roofed: true },
+        { u: c, v: c + main * 0.62, s: wing, h: Math.round(h * 0.74), lift: 0, roofed: true },
+      ];
+    }
+    case 'setback': {
+      const lower = Math.round(h * 0.62);
+      const upper = h - lower;
+      const s2 = f * 0.72;
+      return [
+        { u: c, v: c, s: f, h: lower, lift: 0, roofed: false },
+        { u: c + (f - s2) / 2, v: c + (f - s2) / 2, s: s2, h: upper, lift: lower, roofed: true },
+      ];
+    }
+    case 'podium': {
+      const podium = Math.round(h * 0.24);
+      const tower = h - podium;
+      const s2 = f * 0.56;
+      return [
+        { u: c, v: c, s: f, h: podium, lift: 0, roofed: false },
+        { u: c + (f - s2) / 2, v: c + (f - s2) / 2, s: s2, h: tower, lift: podium, roofed: true },
+      ];
+    }
+    default:
+      return [{ u: c, v: c, s: f, h, lift: 0, roofed: true }];
+  }
+}
+
+/** Total height of the tallest stack, used to size the sprite canvas. */
+function recipeHeight(rec) {
+  return Math.max(...massingParts(rec).map((p) => p.h + p.lift));
 }
 
 // --------------------------------------------------------------- sprites --
@@ -155,14 +448,12 @@ export function zoneSprite(zoneKey, level, variant, lit) {
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const heights = ZONE_HEIGHTS[zoneKey];
-  const baseH = heights[level] || heights[heights.length - 1];
+  const rec = buildingRecipe(zoneKey, level, variant);
   const palettes = BUILDING_PALETTES[zoneKey];
-  const colors = palettes[variant % palettes.length];
+  const colors = palettes[rec.palette % palettes.length];
 
-  const lowRise = zoneKey === 'R_LOW' || zoneKey === 'C_LOW';
-  const roofRise = lowRise ? Math.round(baseH * 0.5) : 0;
-  const totalH = baseH + roofRise + 12;
+  const roofRise = rec.roof === 'flat' ? 0 : Math.round(rec.height * rec.roofRise);
+  const totalH = recipeHeight(rec) + roofRise + 24;
 
   const w = TILE_W + PAD * 2;
   const h = TILE_H + totalH + PAD * 2;
@@ -171,51 +462,36 @@ export function zoneSprite(zoneKey, level, variant, lit) {
   const ox = w / 2;
   const oy = totalH + PAD;
 
-  // Suburban stock sits back from the lot line; towers fill it.
-  const span = lowRise ? 0.78 : 0.94;
-  const seed = hash2(variant, level, zoneKey.length * 31);
+  // Back to front within the lot, then bottom to top for stacked masses.
+  const parts = massingParts(rec)
+    .sort((a, b) => (a.u + a.v) - (b.u + b.v) || a.lift - b.lift);
 
-  const box = isoBox(ctx, ox, oy + (1 - span) * TILE_H * 0.5, span, baseH, colors);
+  for (const part of parts) {
+    const off = isoOffset(part.u, part.v);
+    const box = isoBox(ctx, ox + off.x, oy + off.y - part.lift, part.s, part.h, colors);
+    dressBox(ctx, box, windowLayout(rec.windows, part.h, part.s), colors, rec.seed + part.u * 1000, lit);
 
-  const floors = Math.max(1, Math.round(baseH / (lowRise ? 11 : 13)));
-  const cols = Math.max(1, Math.round(span * (lowRise ? 2 : 3)));
-  windows(ctx, box.left, { x: box.w2, y: box.h2 }, baseH, cols, floors, colors.win, seed, lit);
-  windows(ctx, box.bottom, { x: box.w2, y: -box.h2 }, baseH, cols, floors, colors.win, seed + 91, lit);
+    if (!part.roofed) {
+      flatRoofDetail(ctx, box, colors, { ...rec, tanks: 0, antenna: false });
+      continue;
+    }
 
-  if (lowRise) {
-    hipRoof(ctx, ox, oy + (1 - span) * TILE_H * 0.5, span, baseH, roofRise, colors.roof);
-  } else {
-    rooftopClutter(ctx, ox, oy + (1 - span) * TILE_H * 0.5, span, baseH, colors, seed);
+    const rise = rec.roof === 'flat' ? 0 : Math.round(part.h * rec.roofRise);
+    if (rec.roof === 'hip') {
+      hipRoof(ctx, box.ox, box.oy, part.s, part.h, rise, colors.roof);
+      if (rec.chimney) chimney(ctx, box, colors, rec);
+    } else if (rec.roof === 'gable') {
+      gableRoof(ctx, box.ox, box.oy, part.s, part.h, rise, colors.roof, colors.wall);
+      if (rec.chimney) chimney(ctx, box, colors, rec);
+    } else {
+      flatRoofDetail(ctx, box, colors, rec);
+    }
+    if (rec.awning) awning(ctx, box, colors);
   }
 
   const sprite = { canvas, ox: -ox, oy: -oy };
   cache.set(key, sprite);
   return sprite;
-}
-
-/** Vents, stair housings and a parapet -- the details that sell a flat roof. */
-function rooftopClutter(ctx, ox, oy, span, height, colors, seed) {
-  const w2 = (span * TILE_W) / 2;
-  const h2 = (span * TILE_H) / 2;
-
-  // parapet
-  ctx.strokeStyle = shade(colors.roof, 0.72);
-  ctx.lineWidth = 1.5;
-  rhombus(ctx, ox, oy, span, height);
-  ctx.stroke();
-
-  const count = 1 + (seed % 3);
-  for (let k = 0; k < count; k++) {
-    const hx = hash2(k, seed, 17) / 4294967296;
-    const hy = hash2(k, seed, 29) / 4294967296;
-    // Keep clutter inside the roof rhombus: |u| + |v| <= 1 in rhombus space.
-    const u = (hx - 0.5) * 1.1, v = (hy - 0.5) * 1.1;
-    if (Math.abs(u) + Math.abs(v) > 0.62) continue;
-    const cx = ox + u * w2 + v * w2;
-    const cy = oy + h2 - height + (u * h2 - v * h2);
-    const bh = 3 + (seed >> (k * 3)) % 5;
-    isoBox(ctx, cx, cy - h2 * 0.18, span * 0.22, bh, { wall: colors.roof, roof: shade(colors.roof, 1.12) });
-  }
 }
 
 /** Sprite for a placed service building. */
@@ -227,7 +503,7 @@ export function buildingSprite(type, lit) {
   const spec = BUILDINGS[type];
   const span = spec.span;
   const height = spec.height;
-  const totalH = height + span * 14 + 20;   // headroom for stacks and clutter
+  const totalH = height + span * 14 + 20;
 
   const w = span * TILE_W + PAD * 2;
   const h = span * TILE_H + totalH + PAD * 2;
@@ -241,11 +517,9 @@ export function buildingSprite(type, lit) {
   } else {
     const colors = { wall: spec.color, roof: shade(spec.color, 0.86), win: '#cfe0e6' };
     const box = isoBox(ctx, ox, oy, span * 0.9, height, colors);
-    // Two storeys of windows on anything tall enough to have them.
-    const rows = Math.max(1, Math.round(height / 15));
-    windows(ctx, box.left, { x: box.w2, y: box.h2 }, height, span * 2, rows, colors.win, 5, lit);
-    windows(ctx, box.bottom, { x: box.w2, y: -box.h2 }, height, span * 2, rows, colors.win, 41, lit);
-    rooftopClutter(ctx, ox, oy, span * 0.9, height, colors, type.length * 37 + span);
+    const layout = { cols: span * 2, rows: Math.max(1, Math.round(height / 15)), insetU: 0.22, insetV: 0.24, skip: 7 };
+    dressBox(ctx, box, layout, colors, 5, lit);
+    flatRoofDetail(ctx, box, colors, { tanks: 1 + (span % 2), antenna: false, seed: type.length * 37 + span });
     if (spec.supply) drawStacks(ctx, ox, oy, span, height, spec);
   }
 
@@ -261,7 +535,6 @@ function drawPark(ctx, ox, oy, span) {
   ctx.strokeStyle = '#4a7333';
   ctx.lineWidth = 1;
   ctx.stroke();
-  // a path and a couple of trees
   ctx.strokeStyle = '#b6a986';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -276,15 +549,14 @@ function drawPark(ctx, ox, oy, span) {
 function drawStacks(ctx, ox, oy, span, height, spec) {
   if (spec.supply <= 0) return;
   const stackH = spec.pollution > 10 ? 34 : 16;
-  const positions = [[-0.22, -0.1], [0.16, 0.14]];
-  for (const [u, v] of positions) {
+  for (const [u, v] of [[-0.22, -0.1], [0.16, 0.14]]) {
     const cx = ox + (u + v) * (span * TILE_W) / 2;
     const cy = oy + (span * TILE_H) / 2 - height + (u - v) * (span * TILE_H) / 2;
     isoBox(ctx, cx, cy, span * 0.2, stackH, { wall: '#9a9188', roof: '#3a352f' });
   }
 }
 
-/** A single tree, used for both terrain scatter and park decoration. */
+/** A single tree, used for terrain scatter and park decoration. */
 export function treeSprite(variant) {
   const key = `t:${variant}`;
   const hit = cache.get(key);
@@ -313,5 +585,4 @@ function drawTreeAt(ctx, x, baseY, variant) {
   ctx.fill();
 }
 
-/** Drop cached sprites (called when the lighting mode flips day/night). */
 export function clearSpriteCache() { cache.clear(); }

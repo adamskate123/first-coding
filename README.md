@@ -90,6 +90,20 @@ where the camera starts. Roughly half of all seeds produce a river that
 genuinely splits the map — which is the point, now that you can bridge it.
 `tests/terrain.test.js` asserts those properties across many seeds.
 
+**Building design** comes from a *recipe*: a pure function of a lot's variant
+number that picks massing (a plain block, a twin, an L, a setback, a podium and
+tower), roof form (hipped, gabled, flat), height, window treatment (grid,
+ribbon, columns, sparse) and details like chimneys, roof tanks and antennae.
+Because it is pure and deterministic, a lot looks the same for the life of the
+city without storing anything about how it was drawn -- and the variety is
+*measurable*, so `tests/buildings.test.js` can assert that a street is not
+forty copies of one house. Sixteen designs exist per zone type and level.
+
+The recipe is also where coherence is enforced: setbacks never appear on
+two-storey buildings, pitched roofs never land on towers, and height stays
+within a jitter band of the level baseline so a building's size still reads as
+its development stage.
+
 All building art is drawn procedurally as isometric volumes at load time and
 cached, so there are no image assets in the repository.
 
@@ -126,7 +140,7 @@ tests/              node --test, no DOM required
 npm test            # node --test tests/*.test.js
 ```
 
-61 tests covering the headless half of the game — everything under `src/sim`
+77 tests covering the headless half of the game — everything under `src/sim`
 plus the world model, projection maths, build tools and save format. They
 include regression tests for each bug found so far: the power model energising
 ungrounded wire, the growth oscillation, multi-tile buildings being repainted
@@ -134,7 +148,8 @@ by their own ground tiles, and advisors repeating themselves forever.
 
 `tests/bridges.test.js` drives the real `ToolController` against a stub game
 object, so span placement, pricing and refusal are tested through the same code
-path the mouse uses.
+path the mouse uses. `tests/buildings.test.js` tests appearance without a
+canvas, by checking the recipes rather than the pixels.
 
 ## Saving
 
@@ -147,6 +162,8 @@ changes to the balance tables.
 
 - No tunnels yet, so hills must be gone around rather than through.
 - Avenues carry more traffic than streets but draw at the same width.
+- Lots are one tile, so there are no large footprint buildings in the zones --
+  only service buildings span more than a tile.
 - Data overlays draw over buildings rather than flattening the city, so a
   dense district reads as muddy under an overlay.
 - Terrain cannot be edited; there is no landscaping tool.

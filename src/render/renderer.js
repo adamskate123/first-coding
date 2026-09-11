@@ -13,7 +13,7 @@
 import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, BUILDINGS, SEA_LEVEL, BRIDGE_LIFT } from '../config.js';
 import { tileToWorld } from '../iso.js';
 import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, heatColor, shade } from './palette.js';
-import { zoneSprite, buildingSprite, treeSprite } from './sprites.js';
+import { zoneSprite, buildingSprite, treeSprite, VARIANTS } from './sprites.js';
 import { hash2, clamp } from '../util.js';
 
 /** Largest building footprint in the catalogue, used to size the draw margin. */
@@ -134,7 +134,7 @@ export class Renderer {
       }
     } else if (zone !== Z.NONE && w.level[i] > 0) {
       const info = ZONE_INFO[zone];
-      const variant = hash2(x, y, 11) % 8;
+      const variant = hash2(x, y, 11) % VARIANTS;
       const sp = zoneSprite(info.key, w.level[i], variant, w.powered[i] === 1);
       ctx.drawImage(sp.canvas, p.x + sp.ox, p.y + sp.oy);
 
