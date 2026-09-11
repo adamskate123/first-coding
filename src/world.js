@@ -77,11 +77,24 @@ export class World {
       powerSupply: 0, powerDemand: 0, brownout: false,
       avgLandValue: 0, avgPollution: 0, approval: 50, congestion: 0,
     };
+    /**
+     * Bumped whenever something that is *drawn* changes.
+     *
+     * The renderer caches the city into offscreen layers and re-blits them,
+     * which is only sound if it can tell when the picture has gone stale. Tick
+     * count will not do: most ticks change nothing visible, and rebuilding on
+     * every one throws the cache away for nothing.
+     */
+    this.revision = 0;
+
     this.history = [];      // monthly snapshots for the graphs
     this.log = [];          // advisor messages
 
     this.generateTerrain(seed);
   }
+
+  /** Mark the city as looking different from however it last looked. */
+  touch() { this.revision++; }
 
   idx(x, y) { return y * this.size + x; }
   inBounds(x, y) { return x >= 0 && y >= 0 && x < this.size && y < this.size; }
@@ -196,6 +209,7 @@ export class World {
 
   /** Clear whatever a tile holds. Returns true if anything was removed. */
   clearTile(x, y) {
+    this.touch();
     if (!this.inBounds(x, y)) return false;
     const i = this.idx(x, y);
     let changed = false;
@@ -229,6 +243,7 @@ export class World {
 
   /** Place a catalogue building with its top-left corner at (x, y). */
   placeBuilding(type, x, y) {
+    this.touch();
     const spec = BUILDINGS[type];
     if (!spec) return false;
     const span = spec.span;

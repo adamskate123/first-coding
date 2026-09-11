@@ -12,7 +12,7 @@
 
 import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, ROAD_INFO, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE } from '../config.js';
 import { tileToWorld, tileQuad, flatQuad, quadPoint } from '../iso.js';
-import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, LOT, VEHICLE_TONES, heatColor, shade, mix } from './palette.js';
+import { TERRAIN, ROAD_COLORS, ZONE_TINT, ZONE_EDGE, ZONE_GROUND, SKY, LOT, VEHICLE_TONES, heatColor, shade, mix } from './palette.js';
 import { zoneSprite, buildingSprite, treeSprite, VARIANTS } from './sprites.js';
 import { vehicleLocal, KIND_SIZE } from '../sim/vehicles.js';
 import { hash2, clamp } from '../util.js';
@@ -76,53 +76,166 @@ export class Renderer {
     this.showGrid = false;
     this.showVehicles = true;
     this.vehicles = null;      // a VehicleField, once the game has one
-    this.carsByTile = new Map();
     this.renderCost = 0;       // rolling cost of a full repaint, in ms
+    this.layers = null;        // { ground, structures } offscreen canvases
+    this.layerKey = null;      // what those layers were drawn for
+    this.layerCost = 0;        // rolling cost of rebuilding them
   }
 
   markDirty() { this.dirty = true; }
+
+  /**
+   * What the cached layers were drawn for.
+   *
+   * Anything not in here can change without a rebuild -- which is the point:
+   * the cursor follows the mouse and the traffic moves thirty times a second,
+   * and neither is a reason to repaint a city.
+   */
+  currentKey() {
+    const cam = this.camera;
+    return `${cam.x}|${cam.y}|${cam.zoom}|${this.canvas.width}|${this.canvas.height}`
+      + `|${this.overlay}|${this.showGrid ? 1 : 0}|${this.world.revision}|${this.world.size}`;
+  }
 
   render() {
     if (!this.dirty) return;
     this.dirty = false;
     const started = now();
 
-    const ctx = this.ctx;
-    const { width, height } = this.canvas;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = SKY;
-    ctx.fillRect(0, 0, width, height);
-
-    const cam = this.camera;
-    ctx.setTransform(cam.zoom, 0, 0, cam.zoom, width / 2 - cam.x * cam.zoom, height / 2 - cam.y * cam.zoom);
-
-    // Viewport in world space, with margin for tall buildings.
-    const tl = cam.screenToWorld(0, 0);
-    const br = cam.screenToWorld(width, height);
-    // The margin has to cover the largest building: its sprite is anchored at
-    // the footprint origin but drawn when the sweep reaches the far corner.
-    const reach = MAX_SPAN * TILE_W;
-    this.clip = { x0: tl.x - reach, y0: tl.y - 300, x1: br.x + reach, y1: br.y + MAX_SPAN * TILE_H };
-
-    const w = this.world;
-    const s = w.size;
-    this.bucketVehicles();
-
-    // Diagonal sweep: every tile on diagonal d satisfies x + y === d.
-    for (let d = 0; d <= 2 * (s - 1); d++) {
-      const xStart = Math.max(0, d - s + 1);
-      const xEnd = Math.min(s - 1, d);
-      for (let x = xStart; x <= xEnd; x++) {
-        const y = d - x;
-        this.drawTile(x, y);
-      }
+    const key = this.currentKey();
+    if (key !== this.layerKey) {
+      this.buildLayers();
+      this.layerKey = key;
     }
-
-    if (this.overlay !== 'none') this.drawOverlay();
-    this.drawCursor();
+    this.compose();
 
     // Eased, so one slow frame does not decide the animation's pace.
     this.renderCost = this.renderCost * 0.8 + (now() - started) * 0.2;
+  }
+
+  /** An offscreen canvas the size of the view, cleared and ready. */
+  surface(existing) {
+    const { width, height } = this.canvas;
+    if (existing && existing.width === width && existing.height === height) {
+      existing.getContext('2d').clearRect(0, 0, width, height);
+      return existing;
+    }
+    return typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(width, height)
+      : Object.assign(document.createElement('canvas'), { width, height });
+  }
+
+  /**
+   * Draw the city into two cached layers: everything the traffic drives over,
+   * and everything it drives behind.
+   *
+   * A city is static between simulation ticks, but the traffic is not, and
+   * repainting several thousand tiles thirty times a second to move a few
+   * hundred cars is most of the frame budget -- measured at 174ms a repaint on
+   * a built-out map at wide zoom, which no amount of tuning the cars
+   * themselves would have fixed.
+   *
+   * Splitting at the road surface is what keeps the cars sitting *in* the city
+   * rather than on top of it: the ground layer goes down, the cars go on it,
+   * and the structures layer covers whatever should hide them. Within each
+   * layer the diagonal sweep still decides what covers what, exactly as
+   * before.
+   */
+  buildLayers() {
+    const begun = now();
+    const { width, height } = this.canvas;
+    const cam = this.camera;
+    const w = this.world;
+    const s = w.size;
+
+    this.layers = this.layers || {};
+    this.layers.ground = this.surface(this.layers.ground);
+    this.layers.structures = this.surface(this.layers.structures);
+
+    const place = (canvas) => {
+      const c = canvas.getContext('2d');
+      c.setTransform(cam.zoom, 0, 0, cam.zoom, width / 2 - cam.x * cam.zoom, height / 2 - cam.y * cam.zoom);
+      return c;
+    };
+    const groundCtx = place(this.layers.ground);
+    const structureCtx = place(this.layers.structures);
+
+    // Viewport in world space, with margin for tall buildings. The margin has
+    // to cover the largest building: its sprite is anchored at the footprint
+    // origin but drawn when the sweep reaches the far corner.
+    const tl = cam.screenToWorld(0, 0);
+    const br = cam.screenToWorld(width, height);
+    const reach = MAX_SPAN * TILE_W;
+    this.clip = { x0: tl.x - reach, y0: tl.y - 300, x1: br.x + reach, y1: br.y + MAX_SPAN * TILE_H };
+
+    // The draw methods all paint through this.ctx, so it is pointed at each
+    // layer in turn rather than threading a context through every one of them.
+    const real = this.ctx;
+    const sweep = (fn) => {
+      for (let d = 0; d <= 2 * (s - 1); d++) {
+        const xStart = Math.max(0, d - s + 1);
+        const xEnd = Math.min(s - 1, d);
+        for (let x = xStart; x <= xEnd; x++) fn.call(this, x, d - x);
+      }
+    };
+
+    this.ctx = groundCtx;
+    groundCtx.fillStyle = SKY;
+    groundCtx.save();
+    groundCtx.setTransform(1, 0, 0, 1, 0, 0);
+    groundCtx.fillRect(0, 0, width, height);
+    groundCtx.restore();
+    sweep(this.drawGroundTile);
+
+    this.ctx = structureCtx;
+    sweep(this.drawStructureTile);
+    if (this.overlay !== 'none') this.drawOverlay();
+
+    this.ctx = real;
+    this.layerCost = this.layerCost * 0.7 + (now() - begun) * 0.3;
+  }
+
+  /** Ground, then the traffic on it, then everything that stands above it. */
+  compose() {
+    const ctx = this.ctx;
+    const { width, height } = this.canvas;
+    const cam = this.camera;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.layers.ground, 0, 0);
+
+    ctx.setTransform(cam.zoom, 0, 0, cam.zoom, width / 2 - cam.x * cam.zoom, height / 2 - cam.y * cam.zoom);
+    this.drawTraffic();
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.layers.structures, 0, 0);
+
+    ctx.setTransform(cam.zoom, 0, 0, cam.zoom, width / 2 - cam.x * cam.zoom, height / 2 - cam.y * cam.zoom);
+    this.drawCursor();
+  }
+
+  /**
+   * Every car on screen, back to front.
+   *
+   * Sorted by depth rather than drawn tile by tile, because the tiles are no
+   * longer being walked at this point -- only the cars are.
+   */
+  drawTraffic() {
+    if (!this.vehicles || !this.showVehicles || !this.vehicles.list.length) return;
+    const w = this.world;
+    const order = this.vehicles.list
+      .filter((v) => w.road[v.i])
+      .sort((a, b) => (a.i % w.size + ((a.i / w.size) | 0)) - (b.i % w.size + ((b.i / w.size) | 0)));
+
+    for (const v of order) {
+      const x = v.i % w.size, y = (v.i / w.size) | 0;
+      const p = tileToWorld(x, y, w.tileHeight(x, y));
+      if (!this.visible(p.x, p.y)) continue;
+      const surface = w.deckHeight[v.i] > 0
+        ? flatQuad(x, y, Math.max(w.deckHeight[v.i], SEA_LEVEL + BRIDGE_CLEARANCE))
+        : tileQuad(w, x, y);
+      this.drawVehicle(v, surface);
+    }
   }
 
   /** Screen-space rejection for a tile, before any drawing work. */
@@ -130,7 +243,8 @@ export class Renderer {
     return wx > this.clip.x0 && wx < this.clip.x1 && wy > this.clip.y0 && wy < this.clip.y1;
   }
 
-  drawTile(x, y) {
+  /** The ground, and everything laid flat on it: roads, lots, zoning. */
+  drawGroundTile(x, y) {
     const w = this.world;
     const i = w.idx(x, y);
     // Anything standing on the tile is anchored at the middle of the surface
@@ -138,34 +252,37 @@ export class Renderer {
     const p = tileToWorld(x, y, w.tileHeight(x, y));
     if (!this.visible(p.x, p.y)) return;
 
-    const ctx = this.ctx;
     const terrain = w.terrain[i];
     const quad = tileQuad(w, x, y);
 
-    // --- the ground itself -------------------------------------------------
     if (terrain === T.WATER) {
       this.drawWater(x, y);
     } else {
       this.drawGround(x, y, quad, terrain);
     }
 
-    // --- what the player put there ----------------------------------------
     if (w.road[i]) {
-      // A bridge lays its own carriageway on the deck, and hands that deck back
-      // so anything driving over it rides the span rather than the water.
-      let surface = quad;
-      if (w.deckHeight[i] > 0) surface = this.drawBridge(x, y, i, terrain);
+      // A bridge lays its own carriageway on the deck.
+      if (w.deckHeight[i] > 0) this.drawBridge(x, y, i, terrain);
       else this.drawRoad(x, y, i, quad);
-      // Cars are painted with their own tile, which leaves the painter's sweep
-      // in charge of what hides what: a car behind a tower stays behind it.
-      if (this.carsByTile.size) this.drawVehicles(i, surface);
     }
 
     const zone = w.zone[i];
-    if (zone !== Z.NONE && w.level[i] === 0) this.drawZoneTint(quad, zone, w.roadAccess[i]);
+    if (zone !== Z.NONE && w.level[i] === 0) this.drawZoneTint(x, y, quad, zone, w.roadAccess[i]);
     else if (zone !== Z.NONE && w.build[i] === -1) {
       this.drawLot(x, y, quad, ZONE_INFO[zone].cat, w.wealth[i]);
     }
+  }
+
+  /** Everything that stands up off the ground, and hides what is behind it. */
+  drawStructureTile(x, y) {
+    const w = this.world;
+    const i = w.idx(x, y);
+    const p = tileToWorld(x, y, w.tileHeight(x, y));
+    if (!this.visible(p.x, p.y)) return;
+
+    const ctx = this.ctx;
+    const zone = w.zone[i];
 
     if (w.powerLine[i]) this.drawPowerLine(x, y, i, p);
 
@@ -174,7 +291,6 @@ export class Renderer {
       ctx.drawImage(sp.canvas, p.x + sp.ox, p.y + sp.oy);
     }
 
-    // --- structures --------------------------------------------------------
     const bIdx = w.build[i];
     if (bIdx !== -1) {
       const b = w.buildings[bIdx];
@@ -404,32 +520,6 @@ export class Renderer {
   // ------------------------------------------------------------- traffic --
 
   /**
-   * Sort the fleet by tile, once per frame.
-   *
-   * The sweep paints one tile at a time and needs the cars on that tile there
-   * and then; scanning the whole list per tile would be quadratic on a busy
-   * map. Buckets are reused between frames so a fleet of several hundred cars
-   * at thirty frames a second does not hand the collector a few thousand dead
-   * arrays a second.
-   */
-  bucketVehicles() {
-    for (const bucket of this.carsByTile.values()) bucket.length = 0;
-    if (!this.vehicles || !this.showVehicles) { this.carsByTile.clear(); return; }
-
-    for (const v of this.vehicles.list) {
-      let bucket = this.carsByTile.get(v.i);
-      if (!bucket) this.carsByTile.set(v.i, bucket = []);
-      bucket.push(v);
-    }
-  }
-
-  drawVehicles(i, quad) {
-    const bucket = this.carsByTile.get(i);
-    if (!bucket || !bucket.length) return;
-    for (const v of bucket) this.drawVehicle(v, quad);
-  }
-
-  /**
    * One car: a small box on the carriageway, oriented along its path.
    *
    * Body and width axes are unit vectors in *tile* space before they are
@@ -643,15 +733,49 @@ export class Renderer {
     }
   }
 
-  drawZoneTint(quad, zone, hasRoad) {
+  /**
+   * A plot that has been zoned but not yet built on.
+   *
+   * Drawn as cleared ground with the zoning marked at its boundary, rather
+   * than as a coloured wash over every tile. Most of a growing city is zoned
+   * and empty, so the old flat tint was the largest single element in the
+   * frame -- a dashed quilt of green, blue and yellow diamonds laid over the
+   * landscape, which told you the same thing four thousand times over. The
+   * edge of a district carries all the information the fill was carrying.
+   */
+  drawZoneTint(x, y, quad, zone, hasRoad) {
     const ctx = this.ctx;
-    ctx.fillStyle = ZONE_TINT[zone];
+    const w = this.world;
+
+    ctx.fillStyle = ZONE_GROUND[hash2(x, y, 19) % ZONE_GROUND.length];
     this.quadPath(quad);
     ctx.fill();
-    // Zoned land with no road access is marked so the mistake is visible.
-    ctx.strokeStyle = hasRoad ? 'rgba(255,255,255,0.28)' : 'rgba(220,90,70,0.8)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([2, 3]);
+    ctx.fillStyle = ZONE_TINT[zone];
+    ctx.fill();
+
+    // Only the sides where this zoning stops. Inside a district there is
+    // nothing to draw, which is most of the saving as well as most of the
+    // visual quiet.
+    const edges = [];
+    for (let k = 0; k < 4; k++) {
+      const nx = x + DIRS[k][0], ny = y + DIRS[k][1];
+      if (w.inBounds(nx, ny) && w.zone[w.idx(nx, ny)] === zone && w.level[w.idx(nx, ny)] === 0) continue;
+      edges.push(k);
+    }
+    if (!edges.length && hasRoad) return;
+
+    // Zoned land with no road access is marked all round, so the mistake is
+    // visible rather than implied by a missing edge.
+    ctx.strokeStyle = hasRoad ? ZONE_EDGE[zone] : 'rgba(220,90,70,0.85)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([3, 2]);
+    ctx.beginPath();
+    const pairs = [[1, 2], [3, 2], [0, 3], [0, 1]];
+    for (const k of (hasRoad ? edges : [0, 1, 2, 3])) {
+      const [a, b] = pairs[k];
+      ctx.moveTo(quad[a].x, quad[a].y);
+      ctx.lineTo(quad[b].x, quad[b].y);
+    }
     ctx.stroke();
     ctx.setLineDash([]);
   }

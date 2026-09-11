@@ -284,6 +284,12 @@ export function updatePower(world) {
     }
   }
 
+  // Lit windows and the no-power marker both come off this, so a change in who
+  // has power is a change in the picture.
+  let lit = 0;
+  for (let i = 0; i < n; i++) lit += world.powered[i];
+  if (lit !== world._litCount) { world._litCount = lit; world.touch(); }
+
   for (const b of world.activeBuildings()) {
     b.powered = world.powered[world.idx(b.x, b.y)] === 1;
   }

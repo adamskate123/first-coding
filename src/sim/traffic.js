@@ -105,6 +105,10 @@ export function updateTraffic(world) {
     roadTiles++;
   }
 
+  // Roads are tinted by how loaded they are, so a change here changes the
+  // picture and the renderer's cached layers have to be rebuilt.
+  if (world.traffic.some((v, i) => v !== 0 && world.road[i])) world.touch();
+
   world.stats.congestion = roadTiles ? congestionSum / roadTiles : 0;
   world.stats.jobAccess = totalWorkers > 0 ? reachedWorkers / totalWorkers : 1;
   world.stats.totalJobSlots = totalJobs;

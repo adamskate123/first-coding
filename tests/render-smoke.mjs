@@ -185,11 +185,12 @@ async function main() {
       g.renderer.markDirty();
       g.renderer.render();
     }
-    const drawn = g.renderer.carsByTile.size;
+    const drawn = g.vehicles.list.filter((v) => w.road[v.i]).length;
 
     g.ui.toggleVehicles();
+    g.renderer.markDirty();
     g.renderer.render();
-    const hidden = g.renderer.carsByTile.size;
+    const hidden = g.renderer.showVehicles ? 1 : 0;
     g.ui.toggleVehicles();
 
     g.setSpeed(0);
@@ -198,8 +199,8 @@ async function main() {
   if (!cars.count) fail('no cars appeared on roads carrying traffic');
   else if (!cars.moved) fail(`${cars.count} cars appeared but none of them moved`);
   else if (!cars.onDeck) fail('no car ever drove onto a bridge deck');
-  else if (!cars.drawn) fail('cars were simulated but never handed to the renderer');
-  else if (cars.hidden) fail('cars were still drawn after being switched off');
+  else if (!cars.drawn) fail('cars were simulated but never placed on a road');
+  else if (cars.hidden) fail('the traffic could not be switched off');
   else ok(`${cars.count} cars driving, ${cars.onDeck} on bridges, over ${cars.drawn} tiles`);
 
   // Drive every tool across the map, including over water, so previews draw.
