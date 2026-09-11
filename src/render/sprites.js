@@ -36,7 +36,11 @@ const PAD = 10;
  * thousand combinations. A session will only ever touch a fraction of that, but
  * without a limit the fraction it does touch is never released.
  */
-const CACHE_LIMIT = 400;
+// Sized with headroom: a mature city mixing several zone types, levels,
+// wealth tiers and periods can legitimately need a few hundred distinct
+// sprites, and a cache that evicts ones still on screen would regenerate them
+// every frame.
+const CACHE_LIMIT = 800;
 const cache = createLruCache(CACHE_LIMIT);
 
 const cacheGet = (key) => cache.get(key);

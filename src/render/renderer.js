@@ -16,6 +16,38 @@ import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, LOT, heatColor, shade } from './p
 import { zoneSprite, buildingSprite, treeSprite, VARIANTS } from './sprites.js';
 import { hash2, clamp } from '../util.js';
 
+/** Neighbour offsets, indexed the same way as frontage() and quadEdgeMid(). */
+const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+
+/** Middle of a tile's surface. */
+export function quadCentre(q) {
+  return {
+    x: (q[0].x + q[1].x + q[2].x + q[3].x) / 4,
+    y: (q[0].y + q[1].y + q[2].y + q[3].y) / 4,
+  };
+}
+
+/**
+ * Midpoint of the edge a tile shares with neighbour direction `k`, using the
+ * same indexing as DIRS: +x, +y, -x, -y.
+ */
+export function quadEdgeMid(q, k) {
+  const pair = [[1, 2], [3, 2], [0, 3], [0, 1]][k];
+  return {
+    x: (q[pair[0]].x + q[pair[1]].x) / 2,
+    y: (q[pair[0]].y + q[pair[1]].y) / 2,
+  };
+}
+
+/** A quad shrunk towards its own centre, keeping it on the sloped surface. */
+export function quadInset(q, scale) {
+  const c = quadCentre(q);
+  return q.map((pt) => ({
+    x: c.x + (pt.x - c.x) * scale,
+    y: c.y + (pt.y - c.y) * scale,
+  }));
+}
+
 /** Largest building footprint in the catalogue, used to size the draw margin. */
 const MAX_SPAN = Math.max(...Object.values(BUILDINGS).map((b) => b.span));
 
@@ -88,30 +120,32 @@ export class Renderer {
   drawTile(x, y) {
     const w = this.world;
     const i = w.idx(x, y);
-    const elev = w.elevation[i];
-    const p = tileToWorld(x, y, elev);
+    // Anything standing on the tile is anchored at the middle of the surface
+    // as drawn, not at the plate the raw height map describes.
+    const p = tileToWorld(x, y, w.tileHeight(x, y));
     if (!this.visible(p.x, p.y)) return;
 
     const ctx = this.ctx;
     const terrain = w.terrain[i];
+    const quad = this.tileQuad(x, y);
 
     // --- the ground itself -------------------------------------------------
     if (terrain === T.WATER) {
-      this.drawWater(x, y, p);
+      this.drawWater(x, y);
     } else {
-      this.drawGround(x, y, i, p, terrain, elev);
+      this.drawGround(x, y, quad, terrain);
     }
 
     // --- what the player put there ----------------------------------------
     if (w.road[i]) {
       if (terrain === T.WATER) this.drawBridge(x, y, i);
-      else this.drawRoad(x, y, i, p);
+      else this.drawRoad(x, y, i, quad);
     }
 
     const zone = w.zone[i];
-    if (zone !== Z.NONE && w.level[i] === 0) this.drawZoneTint(p, zone, w.roadAccess[i]);
+    if (zone !== Z.NONE && w.level[i] === 0) this.drawZoneTint(quad, zone, w.roadAccess[i]);
     else if (zone !== Z.NONE && w.build[i] === -1) {
-      this.drawLot(x, y, p, ZONE_INFO[zone].cat, w.wealth[i]);
+      this.drawLot(x, y, quad, ZONE_INFO[zone].cat, w.wealth[i]);
     }
 
     if (w.powerLine[i]) this.drawPowerLine(x, y, i, p);
@@ -131,7 +165,7 @@ export class Renderer {
       // reaches last. Drawing it at the origin instead lets the remaining
       // ground tiles paint over its walls, leaving a roof floating on grass.
       if (x === anchorX(b) && y === anchorY(b)) {
-        const origin = tileToWorld(b.x, b.y, w.elevation[w.idx(b.x, b.y)]);
+        const origin = tileToWorld(b.x, b.y, this.footprintHeight(b));
         const sp = buildingSprite(b.type, b.powered);
         ctx.drawImage(sp.canvas, origin.x + sp.ox, origin.y + sp.oy);
       }
@@ -145,42 +179,23 @@ export class Renderer {
     }
   }
 
-  drawGround(x, y, i, p, terrain, elev) {
+  /**
+   * A tile's surface: one quad spanning its four corner heights.
+   *
+   * Because neighbouring tiles share those corners the surface is watertight,
+   * so there are no cliff faces to draw and no cracks to hide. Relief instead
+   * comes from shading each quad by its own gradient.
+   */
+  drawGround(x, y, quad, terrain) {
     const ctx = this.ctx;
-    const w = this.world;
     const family = terrain === T.SAND ? TERRAIN.sand : terrain === T.ROCK ? TERRAIN.rock : TERRAIN.grass;
     const base = family[hash2(x, y, 3) % family.length];
 
-    // Cliff faces where this tile stands above its two front neighbours.
-    const southElev = y + 1 < w.size ? w.elevation[i + w.size] : elev;
-    const eastElev = x + 1 < w.size ? w.elevation[i + 1] : elev;
-    const dropL = Math.max(0, elev - southElev) * ELEV_STEP;
-    const dropR = Math.max(0, elev - eastElev) * ELEV_STEP;
-
-    if (dropL > 0) {
-      ctx.fillStyle = shade(base, 0.68);
-      ctx.beginPath();
-      ctx.moveTo(p.x - TILE_W / 2, p.y + TILE_H / 2);
-      ctx.lineTo(p.x, p.y + TILE_H);
-      ctx.lineTo(p.x, p.y + TILE_H + dropL);
-      ctx.lineTo(p.x - TILE_W / 2, p.y + TILE_H / 2 + dropL);
-      ctx.closePath();
-      ctx.fill();
-    }
-    if (dropR > 0) {
-      ctx.fillStyle = shade(base, 0.52);
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y + TILE_H);
-      ctx.lineTo(p.x + TILE_W / 2, p.y + TILE_H / 2);
-      ctx.lineTo(p.x + TILE_W / 2, p.y + TILE_H / 2 + dropR);
-      ctx.lineTo(p.x, p.y + TILE_H + dropR);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    ctx.fillStyle = base;
-    this.rhombusPath(p.x, p.y);
+    ctx.fillStyle = shade(base, this.slopeLight(x, y));
+    this.quadPath(quad);
     ctx.fill();
+
+    this.drawBanks(x, y, quad, base);
 
     if (this.showGrid) {
       ctx.strokeStyle = 'rgba(0,0,0,0.10)';
@@ -189,11 +204,58 @@ export class Renderer {
     }
   }
 
-  drawWater(x, y, p) {
+  /**
+   * The bank where land meets water, or runs off the edge of the map.
+   *
+   * Land tiles form one watertight surface, so no faces are needed between
+   * them. Water is different: it is a flat plane at sea level while the shore
+   * above it is not, which leaves a vertical gap along every waterline. This
+   * fills that gap by dropping a skirt from the shore edge to the water.
+   *
+   * Drawn as part of the land tile, which works in both directions: a water
+   * neighbour behind this tile is already painted, and one in front starts at
+   * sea level exactly where the skirt ends.
+   */
+  drawBanks(x, y, quad, base) {
     const ctx = this.ctx;
+    const w = this.world;
+    // Corner pairs per direction, matching DIRS and quadEdgeMid.
+    const EDGES = [
+      [1, 2, [x + 1, y], [x + 1, y + 1]],
+      [3, 2, [x, y + 1], [x + 1, y + 1]],
+      [0, 3, [x, y], [x, y + 1]],
+      [0, 1, [x, y], [x + 1, y]],
+    ];
+
+    for (let k = 0; k < 4; k++) {
+      const nx = x + DIRS[k][0], ny = y + DIRS[k][1];
+      const offMap = !w.inBounds(nx, ny);
+      if (!offMap && w.terrain[w.idx(nx, ny)] !== T.WATER) continue;
+
+      const [a, b, gridA, gridB] = EDGES[k];
+      const seaA = tileToWorld(gridA[0], gridA[1], SEA_LEVEL);
+      const seaB = tileToWorld(gridB[0], gridB[1], SEA_LEVEL);
+      if (quad[a].y >= seaA.y && quad[b].y >= seaB.y) continue;   // nothing to fill
+
+      // Banks facing the viewer catch less light than the ground above them.
+      ctx.fillStyle = shade(base, k === 0 ? 0.54 : k === 1 ? 0.66 : 0.78);
+      ctx.beginPath();
+      ctx.moveTo(quad[a].x, quad[a].y);
+      ctx.lineTo(quad[b].x, quad[b].y);
+      ctx.lineTo(seaB.x, seaB.y);
+      ctx.lineTo(seaA.x, seaA.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  /** Water is a flat plane at sea level, whatever the land around it does. */
+  drawWater(x, y) {
+    const ctx = this.ctx;
+    const surface = tileToWorld(x, y, SEA_LEVEL);
     const family = TERRAIN.water;
     ctx.fillStyle = family[hash2(x, y, 9) % family.length];
-    this.rhombusPath(p.x, p.y);
+    this.rhombusPath(surface.x, surface.y);
     ctx.fill();
 
     // A brighter band where water meets land reads as a shoreline.
@@ -208,33 +270,30 @@ export class Renderer {
     }
   }
 
-  drawRoad(x, y, i, p) {
+  drawRoad(x, y, i, quad) {
     const ctx = this.ctx;
     const w = this.world;
     const isAvenue = w.road[i] === ROAD.AVENUE;
 
+    // The carriageway is the tile's own surface, so a road rides the slope
+    // rather than sitting on a plate above or below it.
     ctx.fillStyle = isAvenue ? ROAD_COLORS.avenue : ROAD_COLORS.street;
-    this.rhombusPath(p.x, p.y);
+    this.quadPath(quad);
     ctx.fill();
 
     // Centre markings run towards each connected neighbour, so junctions and
     // dead ends read correctly without a tileset.
-    const cx = p.x, cy = p.y + TILE_H / 2;
+    const centre = quadCentre(quad);
     ctx.strokeStyle = ROAD_COLORS.markings;
     ctx.lineWidth = isAvenue ? 1.6 : 1;
     ctx.setLineDash(isAvenue ? [4, 3] : [3, 4]);
-
-    const links = [
-      [x + 1, y, TILE_W / 2, TILE_H / 2],
-      [x - 1, y, -TILE_W / 2, -TILE_H / 2],
-      [x, y + 1, -TILE_W / 2, TILE_H / 2],
-      [x, y - 1, TILE_W / 2, -TILE_H / 2],
-    ];
     ctx.beginPath();
-    for (const [nx, ny, dx, dy] of links) {
+    for (let k = 0; k < 4; k++) {
+      const nx = x + DIRS[k][0], ny = y + DIRS[k][1];
       if (!w.inBounds(nx, ny) || !w.road[w.idx(nx, ny)]) continue;
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx + dx, cy + dy);
+      const edge = quadEdgeMid(quad, k);
+      ctx.moveTo(centre.x, centre.y);
+      ctx.lineTo(edge.x, edge.y);
     }
     ctx.stroke();
     ctx.setLineDash([]);
@@ -320,11 +379,30 @@ export class Renderer {
       if (!w.inBounds(nx, ny)) continue;
       const j = w.idx(nx, ny);
       if (!w.powerLine[j]) continue;
-      const nElev = w.elevation[j] - w.elevation[i];
+      const rise = w.tileHeight(nx, ny) - w.tileHeight(x, y);
       ctx.moveTo(cx, cy - 15);
-      ctx.lineTo(cx + dx, cy + dy - 15 - nElev * ELEV_STEP);
+      ctx.lineTo(cx + dx, cy + dy - 15 - rise * ELEV_STEP);
     }
     ctx.stroke();
+  }
+
+  /**
+   * Mean surface height under a building's whole footprint.
+   *
+   * A multi-tile building is anchored at one corner of its plot, so on sloping
+   * ground the far corner would otherwise float or sink. Averaging across the
+   * footprint splits the difference.
+   */
+  footprintHeight(b) {
+    const w = this.world;
+    let sum = 0, count = 0;
+    for (let dy = 0; dy < b.span; dy++) {
+      for (let dx = 0; dx < b.span; dx++) {
+        sum += w.tileHeight(b.x + dx, b.y + dy);
+        count++;
+      }
+    }
+    return count ? sum / count : 0;
   }
 
   /**
@@ -333,9 +411,8 @@ export class Renderer {
    */
   frontage(x, y) {
     const w = this.world;
-    const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]];
     for (let k = 0; k < 4; k++) {
-      const nx = x + dirs[k][0], ny = y + dirs[k][1];
+      const nx = x + DIRS[k][0], ny = y + DIRS[k][1];
       if (w.inBounds(nx, ny) && w.road[w.idx(nx, ny)]) return k;
     }
     return -1;
@@ -349,7 +426,7 @@ export class Renderer {
    * sparse, and the drive running out to the street is what ties a building to
    * the road it was built for.
    */
-  drawLot(x, y, p, category, wealth) {
+  drawLot(x, y, quad, category, wealth) {
     const ctx = this.ctx;
     const rich = wealth >= 2;
 
@@ -367,8 +444,9 @@ export class Renderer {
     // lot line, so neighbouring commercial and industrial lots run together
     // into one continuous surface the way a trading estate does.
     const inset = category === 'R' ? 0.92 : 1;
+    const pad = quadInset(quad, inset);
     ctx.fillStyle = surface;
-    this.lotPath(p, inset);
+    this.quadPath(pad);
     ctx.fill();
 
     // A hedge marks out a well-to-do garden.
@@ -383,8 +461,8 @@ export class Renderer {
 
     // The drive is drawn as a wedge widest at the street, because the building
     // sits over the middle of the lot and would hide an even-width strip.
-    const edge = this.edgeMidpoint(p, k);
-    const centre = { x: p.x, y: p.y + TILE_H / 2 };
+    const edge = quadEdgeMid(quad, k);
+    const centre = quadCentre(quad);
     const along = { x: centre.x - edge.x, y: centre.y - edge.y };
     const across = { x: -along.y, y: along.x };   // perpendicular, in screen space
     const wide = category === 'R' ? 0.30 : 0.62;
@@ -415,33 +493,10 @@ export class Renderer {
     }
   }
 
-  /** Midpoint of the tile edge shared with neighbour direction `k`. */
-  edgeMidpoint(p, k) {
-    switch (k) {
-      case 0: return { x: p.x + TILE_W / 4, y: p.y + TILE_H * 0.75 };   // +x
-      case 1: return { x: p.x - TILE_W / 4, y: p.y + TILE_H * 0.75 };   // +y
-      case 2: return { x: p.x - TILE_W / 4, y: p.y + TILE_H * 0.25 };   // -x
-      default: return { x: p.x + TILE_W / 4, y: p.y + TILE_H * 0.25 };  // -y
-    }
-  }
-
-  /** A rhombus inset from the tile edge, concentric with the tile. */
-  lotPath(p, scale) {
-    const ctx = this.ctx;
-    const cx = p.x, cy = p.y + TILE_H / 2;
-    const hw = (scale * TILE_W) / 2, hh = (scale * TILE_H) / 2;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - hh);
-    ctx.lineTo(cx + hw, cy);
-    ctx.lineTo(cx, cy + hh);
-    ctx.lineTo(cx - hw, cy);
-    ctx.closePath();
-  }
-
-  drawZoneTint(p, zone, hasRoad) {
+  drawZoneTint(quad, zone, hasRoad) {
     const ctx = this.ctx;
     ctx.fillStyle = ZONE_TINT[zone];
-    this.rhombusPath(p.x, p.y);
+    this.quadPath(quad);
     ctx.fill();
     // Zoned land with no road access is marked so the mistake is visible.
     ctx.strokeStyle = hasRoad ? 'rgba(255,255,255,0.28)' : 'rgba(220,90,70,0.8)';
@@ -478,10 +533,10 @@ export class Renderer {
         if (w.terrain[i] === T.WATER) continue;
         const v = field(i);
         if (v <= 0.001) continue;
-        const p = tileToWorld(x, y, w.elevation[i]);
+        const p = tileToWorld(x, y, w.tileHeight(x, y));
         if (!this.visible(p.x, p.y)) continue;
         ctx.fillStyle = heatColor(v);
-        this.rhombusPath(p.x, p.y);
+        this.quadPath(this.tileQuad(x, y));
         ctx.fill();
       }
     }
@@ -515,11 +570,55 @@ export class Renderer {
 
     for (const t of tiles) {
       if (!w.inBounds(t.x, t.y)) continue;
-      const p = tileToWorld(t.x, t.y, w.elevation[w.idx(t.x, t.y)]);
-      this.rhombusPath(p.x, p.y);
+      this.quadPath(this.tileQuad(t.x, t.y));
       ctx.fill();
       ctx.stroke();
     }
+  }
+
+  /**
+   * Screen positions of a tile's four surface corners, clockwise from the top.
+   * Neighbouring tiles read the same corner values, so their edges coincide
+   * exactly and the terrain is drawn as one continuous surface.
+   */
+  tileQuad(x, y) {
+    const w = this.world;
+    const stride = w.size + 1;
+    const c = w.cornerHeights();
+    const p = tileToWorld(x, y, 0);
+    return [
+      { x: p.x, y: p.y - c[y * stride + x] * ELEV_STEP },
+      { x: p.x + TILE_W / 2, y: p.y + TILE_H / 2 - c[y * stride + x + 1] * ELEV_STEP },
+      { x: p.x, y: p.y + TILE_H - c[(y + 1) * stride + x + 1] * ELEV_STEP },
+      { x: p.x - TILE_W / 2, y: p.y + TILE_H / 2 - c[(y + 1) * stride + x] * ELEV_STEP },
+    ];
+  }
+
+  /**
+   * How brightly a tile's surface catches the light, from its own gradient.
+   *
+   * With no cliff faces left to read, this is what carries relief: a slope
+   * facing up-left towards the light is lifted, one facing away is dropped.
+   */
+  slopeLight(x, y) {
+    const w = this.world;
+    const stride = w.size + 1;
+    const c = w.cornerHeights();
+    const h00 = c[y * stride + x], h10 = c[y * stride + x + 1];
+    const h01 = c[(y + 1) * stride + x], h11 = c[(y + 1) * stride + x + 1];
+    const dx = ((h10 + h11) - (h00 + h01)) / 2;
+    const dy = ((h01 + h11) - (h00 + h10)) / 2;
+    return clamp(1 - dx * 0.16 - dy * 0.06, 0.68, 1.32);
+  }
+
+  quadPath(q) {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.moveTo(q[0].x, q[0].y);
+    ctx.lineTo(q[1].x, q[1].y);
+    ctx.lineTo(q[2].x, q[2].y);
+    ctx.lineTo(q[3].x, q[3].y);
+    ctx.closePath();
   }
 
   rhombusPath(ox, oy) {

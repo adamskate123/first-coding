@@ -12,7 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { World } from '../src/world.js';
-import { T, MAP_SIZE } from '../src/config.js';
+import { T, MAP_SIZE, SEA_LEVEL } from '../src/config.js';
 
 const SEEDS = Array.from({ length: 12 }, (_, k) => k * 7919 + 13);
 
@@ -117,4 +117,135 @@ test('water is rendered flat at a single sea level', () => {
     if (w.terrain[i] === T.WATER) levels.add(w.elevation[i]);
   }
   assert.equal(levels.size, 1, 'all water sits at one elevation');
+});
+
+// ------------------------------------------------------------------ relief --
+
+/** A tile's four corner heights, in the order the renderer reads them. */
+function tileCorners(world, x, y) {
+  return {
+    top: world.cornerAt(x, y),
+    right: world.cornerAt(x + 1, y),
+    bottom: world.cornerAt(x + 1, y + 1),
+    left: world.cornerAt(x, y + 1),
+  };
+}
+
+test('neighbouring tiles agree exactly on the corners they share', () => {
+  // This is the invariant the whole approach rests on: shared corners mean
+  // shared edges, so the terrain is one watertight surface with no steps
+  // between tiles and no cracks needing a cliff face to hide them.
+  const w = new World(40, 77);
+  for (let y = 0; y < w.size - 1; y++) {
+    for (let x = 0; x < w.size - 1; x++) {
+      const here = tileCorners(w, x, y);
+      const east = tileCorners(w, x + 1, y);
+      const south = tileCorners(w, x, y + 1);
+
+      assert.equal(here.right, east.top, `(${x},${y}) and its east neighbour disagree`);
+      assert.equal(here.bottom, east.left, `(${x},${y}) and its east neighbour disagree`);
+      assert.equal(here.left, south.top, `(${x},${y}) and its south neighbour disagree`);
+      assert.equal(here.bottom, south.right, `(${x},${y}) and its south neighbour disagree`);
+    }
+  }
+});
+
+test('a corner is the average of the tiles meeting at it', () => {
+  const w = new World(30, 5);
+  const s = w.size;
+  for (const [cx, cy] of [[10, 10], [1, 1], [0, 0], [s, s], [s, 4]]) {
+    let sum = 0, count = 0;
+    for (let dy = -1; dy <= 0; dy++) {
+      for (let dx = -1; dx <= 0; dx++) {
+        const tx = cx + dx, ty = cy + dy;
+        if (tx < 0 || ty < 0 || tx >= s || ty >= s) continue;
+        sum += w.elevation[ty * s + tx];
+        count++;
+      }
+    }
+    const expected = count ? sum / count : w.cornerAt(cx, cy);
+    assert.ok(Math.abs(w.cornerAt(cx, cy) - expected) < 1e-5, `corner (${cx},${cy})`);
+  }
+});
+
+test('a tile height is the mean of its own four corners', () => {
+  const w = new World(30, 9);
+  for (const [x, y] of [[5, 5], [17, 3], [0, 0], [29, 29]]) {
+    const c = tileCorners(w, x, y);
+    const expected = (c.top + c.right + c.bottom + c.left) / 4;
+    assert.ok(Math.abs(w.tileHeight(x, y) - expected) < 1e-5, `tile (${x},${y})`);
+  }
+});
+
+test('the surface never dips below the water plane', () => {
+  // Water sits exactly at sea level and land strictly above it, so no corner
+  // can average below the water -- which is what lets the shoreline grade into
+  // a beach instead of needing to be clamped.
+  const w = new World(48, 12);
+  const s = w.size;
+  for (let cy = 0; cy <= s; cy++) {
+    for (let cx = 0; cx <= s; cx++) {
+      assert.ok(w.cornerAt(cx, cy) >= SEA_LEVEL - 1e-6,
+        `corner (${cx},${cy}) sits at ${w.cornerAt(cx, cy)}, below sea level`);
+    }
+  }
+});
+
+test('smoothing flattens the steps without flattening the map', () => {
+  const w = new World(64, 31);
+  const s = w.size;
+  let rawStep = 0, smoothStep = 0, lo = Infinity, hi = -Infinity;
+
+  for (let y = 0; y < s - 1; y++) {
+    for (let x = 0; x < s - 1; x++) {
+      const raw = w.elevation[y * s + x];
+      rawStep = Math.max(rawStep, Math.abs(raw - w.elevation[y * s + x + 1]));
+      rawStep = Math.max(rawStep, Math.abs(raw - w.elevation[(y + 1) * s + x]));
+
+      const h = w.tileHeight(x, y);
+      smoothStep = Math.max(smoothStep, Math.abs(h - w.tileHeight(x + 1, y)));
+      smoothStep = Math.max(smoothStep, Math.abs(h - w.tileHeight(x, y + 1)));
+      lo = Math.min(lo, h); hi = Math.max(hi, h);
+    }
+  }
+
+  assert.ok(smoothStep < rawStep,
+    `smoothing did not reduce the worst step (raw ${rawStep}, smoothed ${smoothStep})`);
+  assert.ok(hi - lo > 4, `the map was flattened into a plain (relief ${(hi - lo).toFixed(1)})`);
+});
+
+test('flat ground produces a flat surface', () => {
+  const w = new World(20, 1);
+  w.elevation.fill(14);
+  w._corners = null;
+  for (const [x, y] of [[5, 5], [10, 2], [19, 19]]) {
+    const c = tileCorners(w, x, y);
+    for (const [name, h] of Object.entries(c)) {
+      assert.equal(h, 14, `tile (${x},${y}) ${name} corner is not flat`);
+    }
+  }
+});
+
+test('a slope rises monotonically across the surface', () => {
+  const w = new World(20, 1);
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) w.elevation[y * 20 + x] = 8 + x;
+  w._corners = null;
+
+  let previous = -Infinity;
+  for (let x = 0; x < 20; x++) {
+    const h = w.tileHeight(x, 10);
+    assert.ok(h > previous, `height fell back at x=${x}`);
+    previous = h;
+  }
+});
+
+test('the corner field is computed once and reused', () => {
+  const w = new World(24, 3);
+  assert.equal(w.cornerHeights(), w.cornerHeights(), 'the field was rebuilt');
+});
+
+test('a tile height outside the map falls back to sea level', () => {
+  const w = new World(16, 2);
+  assert.equal(w.tileHeight(-1, 5), SEA_LEVEL);
+  assert.equal(w.tileHeight(99, 5), SEA_LEVEL);
 });

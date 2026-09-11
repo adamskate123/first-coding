@@ -82,6 +82,20 @@ road network, traffic solver and power grid all treat a finished span as
 ordinary road, so a bridge becomes a bottleneck exactly the way a real one
 does.
 
+**Relief** is sampled at tile *corners*, not tile centres. One height per tile
+forces every tile to be a flat plate, so a gentle hill comes out as a staircase
+with a vertical cliff at every step. Sampling at corners lets each tile be
+drawn as a sloped quad, and because neighbouring tiles share their corners the
+whole surface is watertight — no steps, no cliff faces between tiles, and no
+cracks needing to be papered over. With those faces gone, relief is carried by
+shading each quad according to its own gradient.
+
+The one place a vertical face is still needed is the waterline: water is a flat
+plane at sea level while the shore above it is not, so land drops a bank to
+meet it. Anything standing on a tile — buildings, trees, roads, lot surfaces —
+is anchored on the surface as drawn rather than on the plate the height map
+nominally describes, so a road rides a slope instead of stepping down it.
+
 **Terrain** blends an fBm height field with a radial shore falloff and a carved
 river. The constants were tuned by sweeping them against explicit targets:
 about a quarter of the map under water, land resolving into at most two
@@ -185,7 +199,7 @@ tests/              node --test, no DOM required
 npm test            # node --test tests/*.test.js
 ```
 
-116 tests covering the headless half of the game — everything under `src/sim`
+125 tests covering the headless half of the game — everything under `src/sim`
 plus the world model, projection maths, build tools and save format. They
 include regression tests for each bug found so far: the power model energising
 ungrounded wire, the growth oscillation, multi-tile buildings being repainted
@@ -198,7 +212,9 @@ canvas, by checking the recipes rather than the pixels -- including that the
 three wealth tiers really do produce different buildings, and that all three
 are reachable from land values a city actually produces. `tests/eras.test.js`
 covers build years being recorded, kept and saved, and the LRU cache's
-eviction.
+eviction. `tests/terrain.test.js` asserts the relief invariant that makes the
+surface watertight: neighbouring tiles must agree exactly on the corners they
+share.
 
 ## Saving
 
@@ -218,6 +234,8 @@ changes to the balance tables.
 - Data overlays draw over buildings rather than flattening the city, so a
   dense district reads as muddy under an overlay.
 - Terrain cannot be edited; there is no landscaping tool.
+- Multi-tile service buildings sit at the average height of their footprint, so
+  on a steep slope one corner still rides slightly high.
 - No day/night cycle, weather, or seasons.
 
 ## Roadmap
@@ -229,6 +247,8 @@ changes to the balance tables.
       contact shadowing grounds the volumes.
 - [x] **Era styles** — cities start in 1900 and buildings keep the period they
       went up in, so a city accumulates visible history.
+- [x] **Smooth relief** — terrain is sampled at tile corners and drawn as a
+      continuous sloped surface instead of stepped plates.
 - [ ] **Tunnels**, so hills can be crossed as well as rivers.
 - [ ] **Water and sewage** as a second utility network, reusing the power
       model's per-network balancing.

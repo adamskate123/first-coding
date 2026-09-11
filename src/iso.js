@@ -98,8 +98,7 @@ export function pickTile(world, camera, sx, sy) {
     const tx = Math.floor(flat.x + step / 2);
     const ty = Math.floor(flat.y + step / 2);
     if (!world.inBounds(tx, ty)) continue;
-    const elev = world.elevation[world.idx(tx, ty)];
-    const origin = tileToWorld(tx, ty, elev);
+    const origin = tileToWorld(tx, ty, world.tileHeight(tx, ty));
     if (pointInRhombus(w.x - origin.x, w.y - origin.y)) return { x: tx, y: ty };
   }
 

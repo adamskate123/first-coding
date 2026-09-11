@@ -94,6 +94,7 @@ export function deserialize(data) {
   // Occupancy follows from the saved development level; the growth pass will
   // confirm it on the next tick.
   world._waterDist = null;
+  world._corners = null;
   for (const k of SERVICE_KEYS) world.coverage[k].fill(0);
   return world;
 }

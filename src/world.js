@@ -258,6 +258,70 @@ export class World {
 
   zoneInfo(i) { return ZONE_INFO[this.zone[i]] || null; }
 
+  /**
+   * Terrain height sampled at tile *corners* rather than at tile centres.
+   *
+   * Storing one height per tile forces every tile to be a flat plate, so a
+   * gentle hill comes out as a staircase of plates with a vertical cliff at
+   * every step. Sampling at corners instead lets a tile be drawn as a sloped
+   * quad, and because neighbouring tiles share their corners the whole surface
+   * is watertight -- no steps, no cliff faces, and no cracks to paper over.
+   *
+   * A corner is the average of the (up to four) tiles meeting at it, so heights
+   * land on quarter-unit precision. Water sits exactly at sea level and land
+   * strictly above it, which means a corner can never average below the water
+   * plane and shorelines grade naturally into beaches.
+   *
+   * There are (size + 1)^2 corners. The field is derived from terrain, which
+   * never changes after generation, so it is computed once and cached.
+   */
+  cornerHeights() {
+    if (this._corners) return this._corners;
+    const s = this.size;
+    const stride = s + 1;
+    const out = new Float32Array(stride * stride);
+
+    for (let cy = 0; cy <= s; cy++) {
+      for (let cx = 0; cx <= s; cx++) {
+        let sum = 0, count = 0;
+        for (let dy = -1; dy <= 0; dy++) {
+          for (let dx = -1; dx <= 0; dx++) {
+            const tx = cx + dx, ty = cy + dy;
+            if (tx < 0 || ty < 0 || tx >= s || ty >= s) continue;
+            sum += this.elevation[ty * s + tx];
+            count++;
+          }
+        }
+        out[cy * stride + cx] = count ? sum / count : SEA_LEVEL;
+      }
+    }
+    this._corners = out;
+    return out;
+  }
+
+  /** Height at one tile corner. Corner (x, y) is the top corner of tile (x, y). */
+  cornerAt(cx, cy) {
+    const stride = this.size + 1;
+    return this.cornerHeights()[cy * stride + cx];
+  }
+
+  /**
+   * Height at the middle of a tile -- the average of its four corners.
+   *
+   * This, not the raw elevation, is where anything standing on the tile is
+   * anchored, so buildings and trees sit on the surface as drawn rather than
+   * on the plate the height map nominally describes.
+   */
+  tileHeight(x, y) {
+    if (!this.inBounds(x, y)) return SEA_LEVEL;
+    const stride = this.size + 1;
+    const c = this.cornerHeights();
+    return (
+      c[y * stride + x] + c[y * stride + x + 1] +
+      c[(y + 1) * stride + x] + c[(y + 1) * stride + x + 1]
+    ) / 4;
+  }
+
   /** Calendar year a lot was last built or rebuilt. */
   builtYear(i) { return START_YEAR + this.builtAge[i]; }
 

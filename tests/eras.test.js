@@ -257,7 +257,7 @@ test('an out-of-range era is clamped rather than breaking', () => {
 
 test('the sprite cache is reported and bounded', () => {
   assert.equal(typeof spriteCacheSize(), 'number');
-  assert.ok(spriteCacheSize() <= 400);
+  assert.ok(spriteCacheSize() <= 800);
 });
 
 // -------------------------------------------------------------- lru cache --
