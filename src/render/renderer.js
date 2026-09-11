@@ -11,7 +11,7 @@
  */
 
 import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, BUILDINGS, SEA_LEVEL, BRIDGE_LIFT } from '../config.js';
-import { tileToWorld } from '../iso.js';
+import { tileToWorld, tileQuad } from '../iso.js';
 import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, LOT, heatColor, shade } from './palette.js';
 import { zoneSprite, buildingSprite, treeSprite, VARIANTS } from './sprites.js';
 import { hash2, clamp } from '../util.js';
@@ -127,7 +127,7 @@ export class Renderer {
 
     const ctx = this.ctx;
     const terrain = w.terrain[i];
-    const quad = this.tileQuad(x, y);
+    const quad = tileQuad(w, x, y);
 
     // --- the ground itself -------------------------------------------------
     if (terrain === T.WATER) {
@@ -536,7 +536,7 @@ export class Renderer {
         const p = tileToWorld(x, y, w.tileHeight(x, y));
         if (!this.visible(p.x, p.y)) continue;
         ctx.fillStyle = heatColor(v);
-        this.quadPath(this.tileQuad(x, y));
+        this.quadPath(tileQuad(w, x, y));
         ctx.fill();
       }
     }
@@ -570,28 +570,10 @@ export class Renderer {
 
     for (const t of tiles) {
       if (!w.inBounds(t.x, t.y)) continue;
-      this.quadPath(this.tileQuad(t.x, t.y));
+      this.quadPath(tileQuad(w, t.x, t.y));
       ctx.fill();
       ctx.stroke();
     }
-  }
-
-  /**
-   * Screen positions of a tile's four surface corners, clockwise from the top.
-   * Neighbouring tiles read the same corner values, so their edges coincide
-   * exactly and the terrain is drawn as one continuous surface.
-   */
-  tileQuad(x, y) {
-    const w = this.world;
-    const stride = w.size + 1;
-    const c = w.cornerHeights();
-    const p = tileToWorld(x, y, 0);
-    return [
-      { x: p.x, y: p.y - c[y * stride + x] * ELEV_STEP },
-      { x: p.x + TILE_W / 2, y: p.y + TILE_H / 2 - c[y * stride + x + 1] * ELEV_STEP },
-      { x: p.x, y: p.y + TILE_H - c[(y + 1) * stride + x + 1] * ELEV_STEP },
-      { x: p.x - TILE_W / 2, y: p.y + TILE_H / 2 - c[(y + 1) * stride + x] * ELEV_STEP },
-    ];
   }
 
   /**

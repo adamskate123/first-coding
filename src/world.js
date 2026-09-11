@@ -7,7 +7,7 @@
  * those sweeps cache-friendly and cheap to serialise.
  */
 
-import { MAP_SIZE, SEA_LEVEL, T, Z, ZONE_INFO, ROAD, BUILDINGS, SERVICE_KEYS, START_FUNDS, START_YEAR, TAX_DEFAULT, VERSION, eraFor } from './config.js';
+import { MAP_SIZE, SEA_LEVEL, T, Z, ZONE_INFO, ROAD, BUILDINGS, SERVICE_KEYS, START_FUNDS, START_YEAR, TAX_DEFAULT, VERSION, MAX_ELEVATION, eraFor } from './config.js';
 import { fbm, clamp, lerp, hash2 } from './util.js';
 
 /**
@@ -165,7 +165,7 @@ export class World {
           h = lerp(h, h * 0.10, depth);
         }
 
-        const elev = clamp(Math.round(h * 30), 0, 30);
+        const elev = clamp(Math.round(h * MAX_ELEVATION), 0, MAX_ELEVATION);
         this.elevation[i] = elev;
 
         if (elev <= SEA_LEVEL) this.terrain[i] = T.WATER;

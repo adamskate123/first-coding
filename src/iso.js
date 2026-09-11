@@ -6,7 +6,7 @@
  * the screen, so height reads as height rather than as depth.
  */
 
-import { TILE_W, TILE_H, ELEV_STEP } from './config.js';
+import { TILE_W, TILE_H, ELEV_STEP, SEA_LEVEL, MAX_ELEVATION, T } from './config.js';
 
 /** Tile (x, y, elevation) -> world-space pixel of the tile's top corner. */
 export function tileToWorld(x, y, elev = 0) {
@@ -82,34 +82,99 @@ export class Camera {
 }
 
 /**
- * Screen pixel -> the tile the cursor is actually over.
+ * The four world-space corners of a tile's drawn surface: top, right, bottom,
+ * left.
  *
- * Because raised tiles cover ground behind them, we start from the flat-ground
- * guess and walk *towards the viewer* (decreasing x+y), accepting the first
- * tile whose elevated rhombus contains the point. That resolves the ambiguity
- * correctly for hills without a depth buffer.
+ * Both the renderer and cursor picking call this, which is the point: what you
+ * click is exactly what was drawn, and the two cannot drift apart. They did
+ * once -- picking still tested a flat rhombus at the tile's centre height after
+ * the terrain had started being drawn as a sloped quad, so on any slope the
+ * cursor selected a tile next to the one under the pointer.
+ *
+ * Water is the exception, drawn as a flat plane at sea level however the
+ * corners around it average out, so it is picked that way too.
  */
-export function pickTile(world, camera, sx, sy) {
-  const w = camera.screenToWorld(sx, sy);
-  const flat = worldToTile(w.x, w.y);
+export function tileQuad(world, x, y) {
+  const p = tileToWorld(x, y, 0);
+  const w2 = TILE_W / 2;
 
-  const PROBE = 14;  // tiles of lookahead; covers the tallest terrain we make
-  for (let step = PROBE; step >= -2; step--) {
-    const tx = Math.floor(flat.x + step / 2);
-    const ty = Math.floor(flat.y + step / 2);
-    if (!world.inBounds(tx, ty)) continue;
-    const origin = tileToWorld(tx, ty, world.tileHeight(tx, ty));
-    if (pointInRhombus(w.x - origin.x, w.y - origin.y)) return { x: tx, y: ty };
+  if (world.terrain[world.idx(x, y)] === T.WATER) {
+    const lift = SEA_LEVEL * ELEV_STEP;
+    return [
+      { x: p.x, y: p.y - lift },
+      { x: p.x + w2, y: p.y + TILE_H / 2 - lift },
+      { x: p.x, y: p.y + TILE_H - lift },
+      { x: p.x - w2, y: p.y + TILE_H / 2 - lift },
+    ];
   }
 
-  const fx = Math.floor(flat.x), fy = Math.floor(flat.y);
-  return world.inBounds(fx, fy) ? { x: fx, y: fy } : null;
+  const stride = world.size + 1;
+  const c = world.cornerHeights();
+  return [
+    { x: p.x, y: p.y - c[y * stride + x] * ELEV_STEP },
+    { x: p.x + w2, y: p.y + TILE_H / 2 - c[y * stride + x + 1] * ELEV_STEP },
+    { x: p.x, y: p.y + TILE_H - c[(y + 1) * stride + x + 1] * ELEV_STEP },
+    { x: p.x - w2, y: p.y + TILE_H / 2 - c[(y + 1) * stride + x] * ELEV_STEP },
+  ];
 }
 
-/** Is (px, py) inside a TILE_W x TILE_H rhombus whose top corner is the origin? */
-function pointInRhombus(px, py) {
-  const hx = TILE_W / 2, hy = TILE_H / 2;
-  const dx = Math.abs(px - hx) / hx;
-  const dy = Math.abs(py - hy) / hy;
-  return dx + dy <= 1;
+/** Which side of the line a->b the point falls on. */
+function side(px, py, a, b) {
+  return (px - b.x) * (a.y - b.y) - (a.x - b.x) * (py - b.y);
+}
+
+function inTriangle(px, py, a, b, c) {
+  const d1 = side(px, py, a, b);
+  const d2 = side(px, py, b, c);
+  const d3 = side(px, py, c, a);
+  const neg = d1 < 0 || d2 < 0 || d3 < 0;
+  const pos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(neg && pos);
+}
+
+/**
+ * Is a world-space point inside a tile's surface?
+ *
+ * Split into two triangles rather than assuming convexity: a steep enough
+ * corner difference can push the top corner below the bottom one.
+ */
+export function pointInQuad(q, px, py) {
+  return inTriangle(px, py, q[0], q[1], q[2]) || inTriangle(px, py, q[0], q[2], q[3]);
+}
+
+/**
+ * How far towards the viewer a click may have to search, in tiles per axis.
+ *
+ * Height lifts a tile straight up the screen, so the tile under the pointer can
+ * be one that would otherwise sit further down. The tallest possible terrain
+ * sets how far that reaches.
+ */
+const PICK_REACH = Math.ceil((MAX_ELEVATION * ELEV_STEP) / TILE_H) + 1;
+
+/**
+ * Screen pixel -> the tile the cursor is actually over.
+ *
+ * Tests the real drawn surface of each candidate and takes the frontmost hit --
+ * greatest x + y, which the painter's-order sweep draws last and therefore on
+ * top. Falling back to the flat-ground tile keeps the shorelines clickable,
+ * where the bank between the land edge and the water belongs to no tile.
+ */
+export function pickTile(world, camera, sx, sy) {
+  const p = camera.screenToWorld(sx, sy);
+  const flat = worldToTile(p.x, p.y);
+  const x0 = Math.floor(flat.x), y0 = Math.floor(flat.y);
+
+  let best = null, bestDepth = -Infinity;
+  for (let dy = -1; dy <= PICK_REACH; dy++) {
+    for (let dx = -1; dx <= PICK_REACH; dx++) {
+      const tx = x0 + dx, ty = y0 + dy;
+      if (tx + ty <= bestDepth || !world.inBounds(tx, ty)) continue;
+      if (!pointInQuad(tileQuad(world, tx, ty), p.x, p.y)) continue;
+      best = { x: tx, y: ty };
+      bestDepth = tx + ty;
+    }
+  }
+  if (best) return best;
+
+  return world.inBounds(x0, y0) ? { x: x0, y: y0 } : null;
 }
