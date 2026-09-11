@@ -8,7 +8,7 @@
  * value sits right on a threshold.
  */
 
-import { ZONE_INFO, Z } from '../config.js';
+import { ZONE_INFO, Z, WEALTH_THRESHOLDS, WEALTH_HYSTERESIS } from '../config.js';
 import { clamp } from '../util.js';
 
 /**
@@ -110,11 +110,36 @@ export function updateGrowth(world, rng) {
       world.dirty = true;
     }
 
+    // --- how prosperous the lot presents as -------------------------------
+    world.wealth[i] = wealthTier(world.landValue[i], world.wealth[i]);
+
     // --- occupancy follows the built level --------------------------------
     const cap = info.cap[world.level[i]] || 0;
     if (info.cat === 'R') { world.pop[i] = cap; world.jobs[i] = 0; }
     else { world.jobs[i] = cap; world.pop[i] = 0; }
   }
+}
+
+/**
+ * Which wealth tier a lot presents as, given the land value under it and the
+ * tier it currently shows.
+ *
+ * Applied with hysteresis: land has to move a clear margin past a boundary
+ * before the tier changes, so a district sitting right on a threshold does not
+ * flicker between two building styles every time the field settles.
+ */
+export function wealthTier(landValue, current = 0) {
+  const [lower, upper] = WEALTH_THRESHOLDS;
+  const m = WEALTH_HYSTERESIS;
+  let tier = current;
+
+  if (landValue >= upper + m) tier = Math.max(tier, 2);
+  else if (landValue >= lower + m) tier = Math.max(tier, 1);
+
+  if (landValue < upper - m) tier = Math.min(tier, 1);
+  if (landValue < lower - m) tier = Math.min(tier, 0);
+
+  return tier;
 }
 
 /** Roll up per-tile occupancy into the city-wide figures. */

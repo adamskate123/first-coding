@@ -10,11 +10,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { World } from '../src/world.js';
-import { Z, ROAD, T, ZONE_INFO } from '../src/config.js';
+import { Z, ROAD, T, ZONE_INFO, WEALTH_THRESHOLDS, WEALTH_HYSTERESIS } from '../src/config.js';
 import { updateRoadAccess, updatePower } from '../src/sim/networks.js';
 import { updateCoverage, updateLandValue, updatePollution } from '../src/sim/fields.js';
 import { updateTraffic } from '../src/sim/traffic.js';
-import { updateGrowth, tallyCity } from '../src/sim/growth.js';
+import { updateGrowth, tallyCity, wealthTier } from '../src/sim/growth.js';
 import { monthlyBudget } from '../src/sim/economy.js';
 import { Simulation } from '../src/sim/index.js';
 import { tileToWorld, worldToTile } from '../src/iso.js';
@@ -645,4 +645,73 @@ test('a single-tile building anchors on itself', () => {
   const b = { x: 4, y: 7, span: 1 };
   assert.equal(anchorX(b), 4);
   assert.equal(anchorY(b), 7);
+});
+
+// ---------------------------------------------------------------- wealth ---
+
+test('wealth tier follows land value', () => {
+  const [lower, upper] = WEALTH_THRESHOLDS;
+  assert.equal(wealthTier(lower - 40, 0), 0, 'cheap land is a modest neighbourhood');
+  assert.equal(wealthTier(lower + 30, 0), 1, 'mid land is comfortable');
+  assert.equal(wealthTier(upper + 60, 0), 2, 'expensive land is affluent');
+});
+
+test('wealth tier has hysteresis, so a district on a boundary does not flicker', () => {
+  // Land value is a diffused field that settles rather than snapping, so a lot
+  // sitting on a threshold would otherwise swap building style every few ticks.
+  const [lower] = WEALTH_THRESHOLDS;
+  const m = WEALTH_HYSTERESIS;
+  assert.equal(wealthTier(lower + m - 2, 0), 0, 'just over the line is not enough to rise');
+  assert.equal(wealthTier(lower + 2, 1), 1, 'nor enough to fall back once risen');
+  assert.equal(wealthTier(lower + m + 5, 0), 1, 'a clear margin does move it up');
+  assert.equal(wealthTier(lower - m - 5, 1), 0, 'and a clear margin moves it down');
+});
+
+test('all three wealth tiers are reachable from land values a city actually produces', () => {
+  // Bands set naively across the full 0-255 range left the top tier
+  // unreachable: developed lots top out near 130 in a well-serviced city, so a
+  // threshold of 155 meant no city ever grew an affluent quarter.
+  const reached = new Set();
+  for (let lv = 60; lv <= 140; lv += 2) reached.add(wealthTier(lv, wealthTier(lv, 0)));
+  assert.ok(reached.has(0), 'no land value in normal range reads as modest');
+  assert.ok(reached.has(1), 'no land value in normal range reads as comfortable');
+  assert.ok(reached.has(2), 'affluence is unreachable in a real city');
+});
+
+test('wealth never leaves the valid tier range', () => {
+  for (let lv = 0; lv <= 255; lv += 5) {
+    for (const current of [0, 1, 2]) {
+      const t = wealthTier(lv, current);
+      assert.ok(t >= 0 && t <= 2, `landValue ${lv} from tier ${current} gave ${t}`);
+      assert.ok(Number.isInteger(t));
+    }
+  }
+});
+
+test('a lot that gets richer land eventually presents as richer', () => {
+  const w = flatWorld(20);
+  const i = w.idx(10, 10);
+  w.zone[i] = Z.R_LOW;
+  w.level[i] = 1;
+  w.roadAccess[i] = 1;
+  w.powered[i] = 1;
+  w.landValue[i] = 20;
+
+  const rng = makeRng(5);
+  updateGrowth(w, rng);
+  assert.equal(w.wealth[i], 0);
+
+  w.landValue[i] = 230;
+  for (let k = 0; k < 5; k++) updateGrowth(w, rng);
+  assert.equal(w.wealth[i], 2, 'the lot caught up with its neighbourhood');
+});
+
+test('bulldozing resets a lot to no wealth', () => {
+  const w = flatWorld(20);
+  const i = w.idx(5, 5);
+  w.zone[i] = Z.R_LOW;
+  w.level[i] = 2;
+  w.wealth[i] = 2;
+  w.clearTile(5, 5);
+  assert.equal(w.wealth[i], 0);
 });

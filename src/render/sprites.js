@@ -24,7 +24,7 @@
  */
 
 import { TILE_W, TILE_H, BUILDINGS } from '../config.js';
-import { BUILDING_PALETTES, TREE_COLORS, FACE, shade } from './palette.js';
+import { buildingPalette, TREE_COLORS, FACE, shade } from './palette.js';
 import { hash2, makeRng, clamp } from '../util.js';
 
 const cache = new Map();
@@ -68,7 +68,7 @@ const STYLES = {
     roofs: ['flat', 'flat', 'gable'],
     massing: ['single', 'single', 'ell'],
     windows: ['ribbon', 'ribbon', 'grid'],
-    footprint: [0.80, 0.94], jitter: 0.18, chimney: 0, awning: 0.65,
+    footprint: [0.60, 0.74], jitter: 0.18, chimney: 0, awning: 0.65,
   },
   C_HIGH: {
     roofs: ['flat'],
@@ -80,7 +80,7 @@ const STYLES = {
     roofs: ['flat', 'flat', 'gable'],
     massing: ['single', 'single', 'ell'],
     windows: ['sparse'],
-    footprint: [0.80, 0.94], jitter: 0.16, chimney: 0,
+    footprint: [0.64, 0.78], jitter: 0.16, chimney: 0,
   },
   I_HEAVY: {
     roofs: ['flat'],
@@ -88,6 +88,20 @@ const STYLES = {
     windows: ['sparse'],
     footprint: [0.84, 0.96], jitter: 0.16, chimney: 0,
   },
+};
+
+/**
+ * How wealth bends a design.
+ *
+ * Money buys frontage, pitch and ornament: an affluent lot builds bigger, roofs
+ * it more steeply and decorates it more, while a poor one is smaller and
+ * plainer. These are multipliers on the zone's own vocabulary rather than a
+ * separate set of buildings, so a rich factory still reads as a factory.
+ */
+const WEALTH_STYLE = {
+  0: { footprint: 0.90, height: 0.94, roofRise: 0.88, detail: 0.55, plainBias: 0.40 },
+  1: { footprint: 1.00, height: 1.00, roofRise: 1.00, detail: 1.00, plainBias: 0 },
+  2: { footprint: 1.07, height: 1.06, roofRise: 1.18, detail: 1.40, plainBias: -0.45 },
 };
 
 /** Stacked forms need enough height to be legible as stacked. */
@@ -99,20 +113,36 @@ const STACK_MIN_HEIGHT = 44;
  * Pure and deterministic: the same arguments always give the same building, so
  * nothing about appearance needs storing or saving.
  */
-export function buildingRecipe(zoneKey, level, variant) {
+export function buildingRecipe(zoneKey, level, variant, wealth = 1) {
   const style = STYLES[zoneKey];
   const heights = ZONE_HEIGHTS[zoneKey];
   if (!style || !heights) return null;
 
+  const tier = Math.max(0, Math.min(2, wealth | 0));
+  const money = WEALTH_STYLE[tier];
+  const category = zoneKey[0];                 // 'R', 'C' or 'I'
+  const palettes = buildingPalette(category, tier);
+
   const capped = Math.min(level, heights.length - 1);
   const base = heights[capped];
-  const rng = makeRng(hash2(variant * 131 + capped, zoneKey.length * 37 + capped, 0x9e3779b9));
+  const rng = makeRng(hash2(variant * 131 + capped, zoneKey.length * 37 + capped * 7 + tier * 1013, 0x9e3779b9));
   const pick = (pool) => pool[Math.min(pool.length - 1, Math.floor(rng() * pool.length))];
 
-  const height = Math.max(6, Math.round(base * (1 + (rng() * 2 - 1) * style.jitter)));
-  const footprint = style.footprint[0] + rng() * (style.footprint[1] - style.footprint[0]);
+  const jitter = 1 + (rng() * 2 - 1) * style.jitter;
+  const height = Math.max(6, Math.round(base * jitter * money.height));
+  const footprint = clamp(
+    (style.footprint[0] + rng() * (style.footprint[1] - style.footprint[0])) * money.footprint,
+    0.5, 0.97,
+  );
 
   let massing = pick(style.massing);
+  // Cheap stock is plain; money buys shape.
+  if (money.plainBias > 0 && rng() < money.plainBias) {
+    massing = 'single';
+  } else if (money.plainBias < 0 && massing === 'single' && rng() < -money.plainBias) {
+    const fancier = style.massing.filter((m) => m !== 'single');
+    if (fancier.length) massing = fancier[Math.floor(rng() * fancier.length)];
+  }
   // A setback or podium on a two-storey building just looks like a mistake.
   if ((massing === 'setback' || massing === 'podium') && height < STACK_MIN_HEIGHT) {
     massing = 'single';
@@ -125,20 +155,22 @@ export function buildingRecipe(zoneKey, level, variant) {
   if (stacked || height > 60) roof = 'flat';
 
   const pitched = roof !== 'flat';
+  const chance = (base) => rng() < base * money.detail;
 
   return {
-    palette: Math.floor(rng() * BUILDING_PALETTES[zoneKey].length),
+    wealth: tier,
+    palette: Math.floor(rng() * palettes.length),
     height,
     footprint,
     massing,
     roof,
-    roofRise: 0.38 + rng() * 0.3,
+    roofRise: clamp((0.38 + rng() * 0.3) * money.roofRise, 0.2, 0.85),
     windows: pick(style.windows),
-    chimney: pitched && rng() < (style.chimney ?? 0),
-    antenna: !pitched && height > 72 && rng() < 0.55,
+    chimney: pitched && chance(style.chimney ?? 0),
+    antenna: !pitched && height > 72 && chance(0.55),
     tanks: pitched ? 0 : Math.floor(rng() * 3),
-    awning: !!style.awning && rng() < style.awning,
-    seed: hash2(variant, capped, 0x51ed),
+    awning: !!style.awning && chance(style.awning),
+    seed: hash2(variant, capped * 8 + tier, 0x51ed),
   };
 }
 
@@ -167,6 +199,49 @@ function rhombus(ctx, ox, oy, span, lift = 0) {
   ctx.closePath();
 }
 
+/** Trace a polygon. */
+function poly(ctx, pts) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
+  ctx.closePath();
+}
+
+/**
+ * Ambient occlusion, faked.
+ *
+ * Real pre-rendered isometric sprites carry baked soft shadowing, and its
+ * absence is most of why flat-filled volumes look like they are hovering. Two
+ * cheap approximations get most of the way: a gradient darkening the foot of
+ * every wall, and a soft contact shadow on the ground. No canvas blur filter is
+ * used -- support for it is patchy -- so the shadow is a few nested shapes at
+ * low alpha instead.
+ */
+const AO_STRENGTH = 0.26;
+const AO_RISE = 0.42;        // fraction of the wall the darkening reaches up
+
+function occludeFace(ctx, pts, baseY, height) {
+  if (height < 4) return;
+  const grad = ctx.createLinearGradient(0, baseY - height * AO_RISE, 0, baseY);
+  grad.addColorStop(0, 'rgba(24, 28, 22, 0)');
+  grad.addColorStop(1, `rgba(24, 28, 22, ${AO_STRENGTH})`);
+  ctx.fillStyle = grad;
+  poly(ctx, pts);
+  ctx.fill();
+}
+
+/** A soft contact shadow on the ground, offset away from the light. */
+function groundShadow(ctx, ox, oy, span) {
+  for (let k = 3; k >= 1; k--) {
+    const grow = 1 + k * 0.07;
+    // Keep the enlarged rhombus concentric with the footprint.
+    const oyAdj = oy + ((span - span * grow) * TILE_H) / 2;
+    ctx.fillStyle = `rgba(28, 34, 24, ${0.07})`;
+    rhombus(ctx, ox + 3, oyAdj + 2, span * grow, 0);
+    ctx.fill();
+  }
+}
+
 /**
  * A solid isometric box: roof slab, front-left face, front-right face.
  * Returns its geometry so callers can decorate the faces.
@@ -178,23 +253,25 @@ function isoBox(ctx, ox, oy, span, height, colors) {
   const left = { x: ox - w2, y: oy + h2 };
   const right = { x: ox + w2, y: oy + h2 };
 
+  const leftFace = [
+    left, bottom,
+    { x: bottom.x, y: bottom.y - height },
+    { x: left.x, y: left.y - height },
+  ];
   ctx.fillStyle = shade(colors.wall, FACE.left);
-  ctx.beginPath();
-  ctx.moveTo(left.x, left.y);
-  ctx.lineTo(bottom.x, bottom.y);
-  ctx.lineTo(bottom.x, bottom.y - height);
-  ctx.lineTo(left.x, left.y - height);
-  ctx.closePath();
+  poly(ctx, leftFace);
   ctx.fill();
+  occludeFace(ctx, leftFace, bottom.y, height);
 
+  const rightFace = [
+    bottom, right,
+    { x: right.x, y: right.y - height },
+    { x: bottom.x, y: bottom.y - height },
+  ];
   ctx.fillStyle = shade(colors.wall, FACE.right);
-  ctx.beginPath();
-  ctx.moveTo(bottom.x, bottom.y);
-  ctx.lineTo(right.x, right.y);
-  ctx.lineTo(right.x, right.y - height);
-  ctx.lineTo(bottom.x, bottom.y - height);
-  ctx.closePath();
+  poly(ctx, rightFace);
   ctx.fill();
+  occludeFace(ctx, rightFace, bottom.y, height);
 
   ctx.fillStyle = colors.roof;
   rhombus(ctx, ox, oy, span, height);
@@ -443,13 +520,13 @@ function recipeHeight(rec) {
  * Returns { canvas, ox, oy } where (ox, oy) is the offset from the tile origin
  * to the sprite's top-left corner.
  */
-export function zoneSprite(zoneKey, level, variant, lit) {
-  const key = `z:${zoneKey}:${level}:${variant}:${lit ? 1 : 0}`;
+export function zoneSprite(zoneKey, level, variant, wealth, lit) {
+  const key = `z:${zoneKey}:${level}:${variant}:${wealth}:${lit ? 1 : 0}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const rec = buildingRecipe(zoneKey, level, variant);
-  const palettes = BUILDING_PALETTES[zoneKey];
+  const rec = buildingRecipe(zoneKey, level, variant, wealth);
+  const palettes = buildingPalette(zoneKey[0], rec.wealth);
   const colors = palettes[rec.palette % palettes.length];
 
   const roofRise = rec.roof === 'flat' ? 0 : Math.round(rec.height * rec.roofRise);
@@ -461,6 +538,8 @@ export function zoneSprite(zoneKey, level, variant, lit) {
   const ctx = canvas.getContext('2d');
   const ox = w / 2;
   const oy = totalH + PAD;
+
+  groundShadow(ctx, ox, oy + ((1 - rec.footprint) * TILE_H) / 2, rec.footprint);
 
   // Back to front within the lot, then bottom to top for stacked masses.
   const parts = massingParts(rec)
@@ -515,6 +594,7 @@ export function buildingSprite(type, lit) {
   if (spec.category === 'park') {
     drawPark(ctx, ox, oy, span);
   } else {
+    groundShadow(ctx, ox, oy + ((span - span * 0.9) * TILE_H) / 2, span * 0.9);
     const colors = { wall: spec.color, roof: shade(spec.color, 0.86), win: '#cfe0e6' };
     const box = isoBox(ctx, ox, oy, span * 0.9, height, colors);
     const layout = { cols: span * 2, rows: Math.max(1, Math.round(height / 15)), insetU: 0.22, insetV: 0.24, skip: 7 };
@@ -573,6 +653,10 @@ export function treeSprite(variant) {
 
 function drawTreeAt(ctx, x, baseY, variant) {
   const c = TREE_COLORS[variant % TREE_COLORS.length];
+  ctx.fillStyle = 'rgba(28, 34, 24, 0.18)';
+  ctx.beginPath();
+  ctx.ellipse(x + 3, baseY - 1, 8, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
   ctx.fillStyle = c.trunk;
   ctx.fillRect(x - 1, baseY - 7, 2, 7);
   ctx.fillStyle = c.canopy;

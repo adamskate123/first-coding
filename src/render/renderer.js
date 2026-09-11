@@ -12,7 +12,7 @@
 
 import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, BUILDINGS, SEA_LEVEL, BRIDGE_LIFT } from '../config.js';
 import { tileToWorld } from '../iso.js';
-import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, heatColor, shade } from './palette.js';
+import { TERRAIN, ROAD_COLORS, ZONE_TINT, SKY, LOT, heatColor, shade } from './palette.js';
 import { zoneSprite, buildingSprite, treeSprite, VARIANTS } from './sprites.js';
 import { hash2, clamp } from '../util.js';
 
@@ -110,6 +110,9 @@ export class Renderer {
 
     const zone = w.zone[i];
     if (zone !== Z.NONE && w.level[i] === 0) this.drawZoneTint(p, zone, w.roadAccess[i]);
+    else if (zone !== Z.NONE && w.build[i] === -1) {
+      this.drawLot(x, y, p, ZONE_INFO[zone].cat, w.wealth[i]);
+    }
 
     if (w.powerLine[i]) this.drawPowerLine(x, y, i, p);
 
@@ -135,7 +138,7 @@ export class Renderer {
     } else if (zone !== Z.NONE && w.level[i] > 0) {
       const info = ZONE_INFO[zone];
       const variant = hash2(x, y, 11) % VARIANTS;
-      const sp = zoneSprite(info.key, w.level[i], variant, w.powered[i] === 1);
+      const sp = zoneSprite(info.key, w.level[i], variant, w.wealth[i], w.powered[i] === 1);
       ctx.drawImage(sp.canvas, p.x + sp.ox, p.y + sp.oy);
 
       if (w.powered[i] !== 1) this.drawNoPowerMark(p);
@@ -322,6 +325,117 @@ export class Renderer {
       ctx.lineTo(cx + dx, cy + dy - 15 - nElev * ELEV_STEP);
     }
     ctx.stroke();
+  }
+
+  /**
+   * Which orthogonal neighbour carries the road a lot fronts onto, as an index
+   * into the direction table, or -1 if the lot has no street frontage.
+   */
+  frontage(x, y) {
+    const w = this.world;
+    const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+    for (let k = 0; k < 4; k++) {
+      const nx = x + dirs[k][0], ny = y + dirs[k][1];
+      if (w.inBounds(nx, ny) && w.road[w.idx(nx, ny)]) return k;
+    }
+    return -1;
+  }
+
+  /**
+   * Furnish a developed lot: mown lawn and a drive for a house, asphalt and
+   * bay markings for a shop, a concrete apron for a works.
+   *
+   * Bare grass running right up to every wall is most of why a city reads as
+   * sparse, and the drive running out to the street is what ties a building to
+   * the road it was built for.
+   */
+  drawLot(x, y, p, category, wealth) {
+    const ctx = this.ctx;
+    const rich = wealth >= 2;
+
+    let surface;
+    if (category === 'R') {
+      const family = rich ? LOT.lawnRich : LOT.lawn;
+      surface = family[hash2(x, y, 23) % family.length];
+    } else if (category === 'C') {
+      surface = LOT.asphalt;
+    } else {
+      surface = LOT.concrete;
+    }
+
+    // A garden stops short of the road; a yard or forecourt is paved to the
+    // lot line, so neighbouring commercial and industrial lots run together
+    // into one continuous surface the way a trading estate does.
+    const inset = category === 'R' ? 0.92 : 1;
+    ctx.fillStyle = surface;
+    this.lotPath(p, inset);
+    ctx.fill();
+
+    // A hedge marks out a well-to-do garden.
+    if (category === 'R' && rich) {
+      ctx.strokeStyle = LOT.hedge;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    }
+
+    const k = this.frontage(x, y);
+    if (k === -1) return;
+
+    // The drive is drawn as a wedge widest at the street, because the building
+    // sits over the middle of the lot and would hide an even-width strip.
+    const edge = this.edgeMidpoint(p, k);
+    const centre = { x: p.x, y: p.y + TILE_H / 2 };
+    const along = { x: centre.x - edge.x, y: centre.y - edge.y };
+    const across = { x: -along.y, y: along.x };   // perpendicular, in screen space
+    const wide = category === 'R' ? 0.30 : 0.62;
+    const narrow = wide * 0.45;
+
+    ctx.fillStyle = category === 'R' ? LOT.drive : shade(surface, 1.16);
+    ctx.beginPath();
+    ctx.moveTo(edge.x + across.x * wide, edge.y + across.y * wide);
+    ctx.lineTo(edge.x - across.x * wide, edge.y - across.y * wide);
+    ctx.lineTo(centre.x - across.x * narrow, centre.y - across.y * narrow);
+    ctx.lineTo(centre.x + across.x * narrow, centre.y + across.y * narrow);
+    ctx.closePath();
+    ctx.fill();
+
+    // Parking bays on commercial frontage.
+    if (category === 'C') {
+      ctx.strokeStyle = LOT.stripe;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let b = -1; b <= 1; b++) {
+        const t = 0.35 + b * 0.22;
+        const bx = edge.x + (centre.x - edge.x) * t;
+        const by = edge.y + (centre.y - edge.y) * t;
+        ctx.moveTo(bx - 5, by - 2.5);
+        ctx.lineTo(bx + 5, by + 2.5);
+      }
+      ctx.stroke();
+    }
+  }
+
+  /** Midpoint of the tile edge shared with neighbour direction `k`. */
+  edgeMidpoint(p, k) {
+    switch (k) {
+      case 0: return { x: p.x + TILE_W / 4, y: p.y + TILE_H * 0.75 };   // +x
+      case 1: return { x: p.x - TILE_W / 4, y: p.y + TILE_H * 0.75 };   // +y
+      case 2: return { x: p.x - TILE_W / 4, y: p.y + TILE_H * 0.25 };   // -x
+      default: return { x: p.x + TILE_W / 4, y: p.y + TILE_H * 0.25 };  // -y
+    }
+  }
+
+  /** A rhombus inset from the tile edge, concentric with the tile. */
+  lotPath(p, scale) {
+    const ctx = this.ctx;
+    const cx = p.x, cy = p.y + TILE_H / 2;
+    const hw = (scale * TILE_W) / 2, hh = (scale * TILE_H) / 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - hh);
+    ctx.lineTo(cx + hw, cy);
+    ctx.lineTo(cx, cy + hh);
+    ctx.lineTo(cx - hw, cy);
+    ctx.closePath();
   }
 
   drawZoneTint(p, zone, hasRoad) {

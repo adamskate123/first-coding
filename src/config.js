@@ -145,6 +145,35 @@ export const TAX_MAX = 20;
 export const TAX_PER_RESIDENT = 1.15;
 export const TAX_PER_JOB = 1.65;
 
+// ------------------------------------------------------------------ wealth --
+
+/**
+ * Wealth tiers.
+ *
+ * The same zone at the same density looks completely different depending on
+ * what the land under it is worth -- weathered clapboard in one neighbourhood,
+ * brick and slate in another. This is the single biggest lever on a city's
+ * character, and it costs nothing to compute because land value is already
+ * simulated per tile.
+ *
+ * Boundaries are applied with hysteresis (see sim/growth.js) so a district
+ * sitting on a threshold does not flicker between two styles.
+ */
+export const WEALTH = { POOR: 0, MIDDLE: 1, RICH: 2 };
+export const WEALTH_NAMES = ['Modest', 'Comfortable', 'Affluent'];
+/**
+ * Land value at which a lot moves up to the next tier.
+ *
+ * Calibrated against what land value developed lots actually reach in play,
+ * not against the theoretical 0-255 range: a serviced city sits around 100 and
+ * a well-parked, well-schooled district tops out near 130. Bands set naively
+ * across the full range left the top tier unreachable, so no city ever grew an
+ * affluent quarter.
+ */
+export const WEALTH_THRESHOLDS = [78, 115];
+/** How far past a boundary the land must go before the tier actually changes. */
+export const WEALTH_HYSTERESIS = 12;
+
 // ---------------------------------------------------------------- services --
 
 export const SERVICE_KEYS = ['police', 'fire', 'health', 'education', 'park'];

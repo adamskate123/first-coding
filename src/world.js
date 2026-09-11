@@ -40,6 +40,7 @@ export class World {
 
     // --- simulated -------------------------------------------------------
     this.level = new Uint8Array(n);            // development stage of a zoned tile
+    this.wealth = new Uint8Array(n);           // WEALTH tier the lot presents as
     this.pop = new Uint16Array(n);             // residents on this tile
     this.jobs = new Uint16Array(n);            // jobs on this tile
     this.landValue = new Uint8Array(n);
@@ -211,6 +212,7 @@ export class World {
     if (this.level[i]) changed = true;
 
     this.level[i] = 0;
+    this.wealth[i] = 0;
     this.pop[i] = 0;
     this.jobs[i] = 0;
     this.growthTimer[i] = 0;

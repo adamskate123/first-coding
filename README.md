@@ -90,10 +90,36 @@ where the camera starts. Roughly half of all seeds produce a river that
 genuinely splits the map — which is the point, now that you can bridge it.
 `tests/terrain.test.js` asserts those properties across many seeds.
 
+**Wealth** is the biggest lever on a city's character. Land value is already
+simulated per tile, so it costs almost nothing to let it choose a lot's whole
+style family as well as its density: weathered boards and faded paint at the
+bottom, tidy warm suburbia in the middle, brick and slate at the top, with
+matching families for commerce and industry. Money also buys frontage, roof
+pitch and ornament. Tiers are applied with hysteresis, so a district sitting on
+a boundary does not flicker between two looks, and the thresholds are
+calibrated against the land values a real city actually reaches rather than
+against the theoretical range -- set naively, the top tier is unreachable and
+no city ever grows an affluent quarter.
+
+**Lots are furnished**, not dropped on bare grass: mown lawn and a drive for a
+house, asphalt and bay markings for a shop, a concrete apron for a works. A
+garden stops short of the road while commercial and industrial lots are paved
+to the lot line, so neighbouring ones run together into a continuous surface
+the way a trading estate does. The drive runs out to whichever neighbouring
+tile carries the road.
+
+**Shading is faked, cheaply.** Pre-rendered isometric sprites carry baked soft
+shadowing, and its absence is most of why flat-filled volumes look like they
+are hovering. Two approximations get most of the way: a gradient darkening the
+foot of every wall, and a soft contact shadow on the ground. No canvas blur
+filter is used -- support for it is patchy -- so the shadow is a few nested
+shapes at low alpha.
+
 **Building design** comes from a *recipe*: a pure function of a lot's variant
-number that picks massing (a plain block, a twin, an L, a setback, a podium and
-tower), roof form (hipped, gabled, flat), height, window treatment (grid,
-ribbon, columns, sparse) and details like chimneys, roof tanks and antennae.
+number and wealth tier that picks massing (a plain block, a twin, an L, a
+setback, a podium and tower), roof form (hipped, gabled, flat), height, window
+treatment (grid, ribbon, columns, sparse) and details like chimneys, roof tanks
+and antennae.
 Because it is pure and deterministic, a lot looks the same for the life of the
 city without storing anything about how it was drawn -- and the variety is
 *measurable*, so `tests/buildings.test.js` can assert that a street is not
@@ -140,7 +166,7 @@ tests/              node --test, no DOM required
 npm test            # node --test tests/*.test.js
 ```
 
-77 tests covering the headless half of the game — everything under `src/sim`
+92 tests covering the headless half of the game — everything under `src/sim`
 plus the world model, projection maths, build tools and save format. They
 include regression tests for each bug found so far: the power model energising
 ungrounded wire, the growth oscillation, multi-tile buildings being repainted
@@ -149,7 +175,9 @@ by their own ground tiles, and advisors repeating themselves forever.
 `tests/bridges.test.js` drives the real `ToolController` against a stub game
 object, so span placement, pricing and refusal are tested through the same code
 path the mouse uses. `tests/buildings.test.js` tests appearance without a
-canvas, by checking the recipes rather than the pixels.
+canvas, by checking the recipes rather than the pixels -- including that the
+three wealth tiers really do produce different buildings, and that all three
+are reachable from land values a city actually produces.
 
 ## Saving
 
@@ -173,6 +201,9 @@ changes to the balance tables.
 
 - [x] **Bridges** — roads and power lines across water, priced as structures
       and laid bank to bank. Rivers now run the full length of the map.
+- [x] **Wealth tiers, furnished lots and faked ambient occlusion** — land
+      value now drives building style, lots carry drives and forecourts, and
+      contact shadowing grounds the volumes.
 - [ ] **Tunnels**, so hills can be crossed as well as rivers.
 - [ ] **Water and sewage** as a second utility network, reusing the power
       model's per-network balancing.
@@ -184,3 +215,8 @@ changes to the balance tables.
 - [ ] **Graphs and history**, using the monthly snapshots already recorded.
 - [ ] **Larger maps with chunked terrain caching**, once redraw cost justifies
       it.
+- [ ] **Era styles**, so buildings reflect the decade they went up in. Needs
+      one byte per tile for the build year.
+- [ ] **An offline sprite pipeline**, if the art should go beyond what can be
+      drawn at runtime. This is how SimCity 3000 did it, and it would mean
+      binary assets and a build step — a change in what the project is.
