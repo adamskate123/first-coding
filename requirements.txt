@@ -1,6 +1,0 @@
-pillow
-pytesseract
-rapidfuzz
-pytest
-# Optional dependency for HGVS variant normalization
-hgvs
