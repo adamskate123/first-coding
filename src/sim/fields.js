@@ -237,6 +237,25 @@ const PRESTIGE_CURVE = 1.7;
 /** How fast a neighbourhood's standing follows what is built on it. */
 const PRESTIGE_EASE = 0.06;
 
+/**
+ * Bring a neighbourhood's standing straight to what its buildings imply.
+ *
+ * The easing exists to damp a feedback loop over time, but a city that has
+ * just been loaded has no time to damp -- it arrives fully built with its
+ * standing at zero, and spends the next few months believing it is worthless.
+ * Measured on a saved city, land value fell from 186 to 127 on load and took
+ * five game months to climb back, which is close enough to the abandonment
+ * threshold that a slightly different city would have started demolishing
+ * itself for no reason the player could see.
+ *
+ * Nothing needs saving to fix it: the settled value is entirely determined by
+ * what stands on the map, so it can simply be recomputed on arrival.
+ */
+export function primePrestige(world) {
+  for (let k = 0; k < 240; k++) updatePrestige(world);
+  return world.prestige;
+}
+
 export function updatePrestige(world) {
   const s = world.size, n = s * s;
   const src = world._prestigeSrc && world._prestigeSrc.length === n

@@ -9,7 +9,7 @@
 
 import { TICKS_PER_MONTH } from '../config.js';
 import { updateRoadAccess, updatePower, updateBridgeDecks } from './networks.js';
-import { updateCoverage, updatePollution, updateCrime, updateLandValue } from './fields.js';
+import { updateCoverage, updatePollution, updateCrime, updateLandValue, primePrestige } from './fields.js';
 import { updateTraffic } from './traffic.js';
 import { updateDemand } from './demand.js';
 import { updateGrowth, tallyCity } from './growth.js';
@@ -24,6 +24,24 @@ export class Simulation {
     this.rng = makeRng(world.seed ^ 0x5f3759df);
     /** Set when the player edits the map, to force the slow passes to re-run. */
     this.topologyDirty = true;
+    // A city can arrive here fully built -- loaded, imported, or handed over
+    // after an edit -- so the state that is derived rather than saved is
+    // brought up to what the map already implies, instead of being discovered
+    // over the following months. Land value is the one that matters: arriving
+    // at zero, a restored city reads as worthless and can begin abandoning
+    // itself for no reason a player could see.
+    //
+    // Order matters here, and getting it wrong is quiet. Coverage needs to
+    // know which service buildings have power, and a neighbourhood's standing
+    // is discounted where the lights are off -- so priming before the grid is
+    // worked out restores a city that believes it is unlit, which recovered
+    // only a third of the shortfall.
+    updateRoadAccess(world);
+    updateBridgeDecks(world);
+    updatePower(world);
+    updateCoverage(world);
+    primePrestige(world);
+    updateLandValue(world);
   }
 
   step() {
@@ -65,7 +83,10 @@ export class Simulation {
     if (w.funds < 0) {
       this.notify('Treasury is overdrawn. Raise taxes or cut services.', 'bad');
     }
-    if (w.stats.brownout) {
+    if (w.stats.deadNetworks > 0) {
+      const n = w.stats.deadNetworks;
+      this.notify(`${n} district${n === 1 ? ' is' : 's are'} wired to no power plant.`, 'bad');
+    } else if (w.stats.brownout) {
       this.notify('Parts of the grid are browning out.', 'bad');
     }
     if (w.stats.unemployment > 0.25 && w.stats.population > 200) {

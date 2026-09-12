@@ -51,6 +51,15 @@ export const ROOF_MATERIALS = [
   { key: 'gravel', tint: '#8a8375', mix: 0.4 },
 ];
 
+/**
+ * A window with the light on.
+ *
+ * Not a lightened version of the glass: under the blue wash of night a
+ * brighter grey stays grey, and the whole point of nightfall in a city builder
+ * is to see which windows are lit. A warm lamp colour reads through it.
+ */
+export const WINDOW_LIT = '#ffd79a';
+
 /** Tint a palette's roof colour towards a material. */
 export function roofColor(base, material) {
   const m = ROOF_MATERIALS[material % ROOF_MATERIALS.length];
@@ -192,14 +201,37 @@ export const TREE_COLORS = [
 ];
 
 /** Zone tints for undeveloped land, in the SC3K dotted-overlay style. */
+/**
+ * Zoned but unbuilt land.
+ *
+ * Faint on purpose. At the old strength this was a flat colour over every
+ * zoned tile, and since most of a growing city is zoned and unbuilt, it was
+ * the single largest element in the frame -- a dashed quilt of green, blue and
+ * yellow diamonds over the landscape. A zoned plot is land that has been
+ * cleared and marked, so it reads as cleared ground with its boundary drawn,
+ * and the colour only has to say which use was marked.
+ */
 export const ZONE_TINT = {
-  1: 'rgba(96, 186, 96, 0.42)',
-  2: 'rgba(52, 150, 72, 0.46)',
-  3: 'rgba(96, 150, 220, 0.42)',
-  4: 'rgba(56, 106, 200, 0.46)',
-  5: 'rgba(214, 178, 74, 0.44)',
-  6: 'rgba(178, 120, 40, 0.48)',
+  1: 'rgba(96, 186, 96, 0.16)',
+  2: 'rgba(52, 150, 72, 0.18)',
+  3: 'rgba(96, 150, 220, 0.16)',
+  4: 'rgba(56, 106, 200, 0.18)',
+  5: 'rgba(214, 178, 74, 0.17)',
+  6: 'rgba(178, 120, 40, 0.19)',
 };
+
+/** The boundary of a zoned area, where the colour actually gets to speak. */
+export const ZONE_EDGE = {
+  1: 'rgba(120, 214, 118, 0.85)',
+  2: 'rgba(70, 186, 96, 0.85)',
+  3: 'rgba(126, 180, 245, 0.85)',
+  4: 'rgba(84, 138, 232, 0.85)',
+  5: 'rgba(236, 200, 96, 0.85)',
+  6: 'rgba(206, 146, 58, 0.85)',
+};
+
+/** Cleared, graded ground: what a marked-out plot looks like before it builds. */
+export const ZONE_GROUND = ['#8a7f66', '#857a62', '#8f846a'];
 
 /**
  * Parse either of the two colour forms used here into RGB components.

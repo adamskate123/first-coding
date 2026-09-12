@@ -24,7 +24,7 @@
  */
 
 import { TILE_W, TILE_H, BUILDINGS, ERAS } from '../config.js';
-import { buildingPalette, applyEra, roofColor, TREE_COLORS, FACE, shade } from './palette.js';
+import { buildingPalette, applyEra, roofColor, TREE_COLORS, FACE, WINDOW_LIT, shade, mix } from './palette.js';
 import { facadeStyle, facadePlan, EL } from './facade.js';
 import { hash2, makeRng, clamp, createLruCache } from '../util.js';
 
@@ -417,7 +417,9 @@ function paintFacade(ctx, anchor, du, plan, colors, lit, seed, faceTint) {
   };
 
   const glass = shade(colors.win, faceTint);
-  const glassLit = shade(colors.win, faceTint * 2.1);
+  // Lit glass is a lamp, not a paler pane: the night wash sits over the whole
+  // frame, and a brighter grey under it is still grey.
+  const glassLit = shade(mix(colors.win, WINDOW_LIT, 0.86), 0.85 + faceTint * 0.25);
   const frame = shade(colors.wall, faceTint * 0.72);
   const trim = shade(colors.wall, faceTint * 1.18);
 
@@ -790,8 +792,8 @@ function recipeHeight(rec) {
  * Returns { canvas, ox, oy } where (ox, oy) is the offset from the tile origin
  * to the sprite's top-left corner.
  */
-export function zoneSprite(zoneKey, level, variant, wealth, era, lit) {
-  const key = `z:${zoneKey}:${level}:${variant}:${wealth}:${era}:${lit ? 1 : 0}`;
+export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1) {
+  const key = `z:${zoneKey}:${level}:${variant}:${wealth}:${era}:${lit ? 1 : 0}:${span}`;
   const hit = cacheGet(key);
   if (hit) return hit;
 
@@ -803,22 +805,24 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit) {
   const roofRise = rec.roof === 'flat' ? 0 : Math.round(rec.height * rec.roofRise);
   const totalH = recipeHeight(rec) + roofRise + 24;
 
-  const w = TILE_W + PAD * 2;
-  const h = TILE_H + totalH + PAD * 2;
+  // A merged lot is the same design over a wider footprint: the massing is in
+  // fractions of the plot, so it scales without a second vocabulary.
+  const w = span * TILE_W + PAD * 2;
+  const h = span * TILE_H + totalH + PAD * 2;
   const canvas = makeCanvas(w, h);
   const ctx = canvas.getContext('2d');
   const ox = w / 2;
   const oy = totalH + PAD;
 
-  groundShadow(ctx, ox, oy + ((1 - rec.footprint) * TILE_H) / 2, rec.footprint, recipeHeight(rec));
+  groundShadow(ctx, ox, oy + ((span - rec.footprint * span) * TILE_H) / 2, rec.footprint * span, recipeHeight(rec));
 
   // Back to front within the lot, then bottom to top for stacked masses.
   const parts = massingParts(rec)
     .sort((a, b) => (a.u + a.v) - (b.u + b.v) || a.lift - b.lift);
 
   for (const part of parts) {
-    const off = isoOffset(part.u, part.v);
-    const box = isoBox(ctx, ox + off.x, oy + off.y - part.lift, part.s, part.h, colors);
+    const off = isoOffset(part.u * span, part.v * span);
+    const box = isoBox(ctx, ox + off.x, oy + off.y - part.lift, part.s * span, part.h, colors);
     const faceWidth = Math.hypot(box.w2, box.h2);
     const plan = facadePlan(rec.facade, part.h, faceWidth, rec.category, rec.seed + Math.round(part.u * 1000));
     dressBox(ctx, box, plan, colors, rec.seed + part.u * 1000, lit);

@@ -140,6 +140,7 @@ export function updateGrowth(world, rng) {
     // --- resolve -----------------------------------------------------------
     if (world.growthTimer[i] >= GROW_THRESHOLD && level < maxLevel) {
       world.level[i] = level + 1;
+      world.touch();
       world.growthTimer[i] = 0;
       // A lot is stamped with its period when it is *first* built out, and
       // keeps it thereafter.
@@ -155,12 +156,14 @@ export function updateGrowth(world, rng) {
       world.dirty = true;
     } else if (world.growthTimer[i] <= DECAY_THRESHOLD && level > 0) {
       world.level[i] = level - 1;
+      world.touch();
       world.growthTimer[i] = 0;
       world.dirty = true;
     }
 
     // --- how prosperous the lot presents as -------------------------------
-    world.wealth[i] = wealthTier(world.landValue[i], world.wealth[i]);
+    const tier = wealthTier(world.landValue[i], world.wealth[i]);
+    if (tier !== world.wealth[i]) { world.wealth[i] = tier; world.touch(); }
 
     // --- occupancy follows the built level --------------------------------
     const cap = info.cap[world.level[i]] || 0;
