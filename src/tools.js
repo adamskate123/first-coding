@@ -9,7 +9,7 @@
  */
 
 import { Z, ZONE_INFO, ROAD, ROAD_INFO, POWERLINE_COST, BULLDOZE_COST, BUILDINGS, T,
-         BRIDGE_COST_MULTIPLIER, POWERLINE_CROSSING_MULTIPLIER } from './config.js';
+         BRIDGE_COST_MULTIPLIER, POWERLINE_CROSSING_MULTIPLIER, isUnlocked } from './config.js';
 
 export const TOOL = {
   SELECT: 'select',
@@ -248,6 +248,10 @@ export class ToolController {
   applyBuilding(tile) {
     const w = this.game.world;
     const spec = BUILDINGS[this.arg];
+    if (!isUnlocked(this.arg, w.year)) {
+      this.game.toast(`${spec.name} is not available until ${spec.from}.`);
+      return;
+    }
     if (spec.cost > w.funds) { this.game.toast('Not enough funds.'); return; }
     if (!w.placeBuilding(this.arg, tile.x, tile.y)) {
       this.game.toast('That site is blocked.');

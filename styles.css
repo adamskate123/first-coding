@@ -481,3 +481,21 @@ select {
 
 #statusline { left: 126px; }
 }
+
+/* A driver behind a number, rather than a number of its own. */
+.row.hint {
+  font-size: 11px;
+  opacity: 0.72;
+  padding-top: 0;
+  padding-left: 8px;
+}
+
+/* A catalogue entry the calendar has not reached yet. */
+.tool-btn.locked {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.tool-btn.locked .cost {
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}

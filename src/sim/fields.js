@@ -39,38 +39,40 @@ export function waterDistance(world) {
 }
 
 /**
- * Stamp every service building's radial influence into its coverage field.
+ * Work out how much of the city each service can look after.
+ *
+ * Services are provided city-wide against a capacity rather than stamped as a
+ * disc around each building. A radius made provision a map-reading exercise:
+ * the same four stations gave wildly different coverage depending where they
+ * happened to land, and nothing on screen told a player how many more they
+ * needed. Capacity against population is a number that can be reasoned about
+ * and reported -- 14,000 of 17,800 residents covered, so build one more.
+ *
+ * The per-tile fields are kept and filled uniformly, so everything downstream
+ * -- land value, crime, approval, the data overlays -- reads provision the
+ * same way it always did.
  * Unpowered buildings provide nothing, which is how a blackout cascades into
  * a crime wave rather than merely dimming the lights.
  */
 export function updateCoverage(world) {
-  for (const k of SERVICE_KEYS) world.coverage[k].fill(0);
-  const s = world.size;
+  const pop = Math.max(0, world.stats.population);
+  const capacity = {};
+  for (const k of SERVICE_KEYS) capacity[k] = 0;
 
   for (const b of world.activeBuildings()) {
     const spec = BUILDINGS[b.type];
     if (!spec.service || !b.on) continue;
     // Parks need no power; staffed services do.
     if (spec.category !== 'park' && !b.powered) continue;
+    capacity[spec.service] += spec.capacity;
+  }
 
-    const field = world.coverage[spec.service];
-    const r = spec.radius;
-    const cx = b.x + (b.span - 1) / 2;
-    const cy = b.y + (b.span - 1) / 2;
-    const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(s - 1, Math.ceil(cx + r));
-    const y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(s - 1, Math.ceil(cy + r));
-
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) {
-        const dx = x - cx, dy = y - cy;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d > r) continue;
-        // Smooth falloff: full strength at the door, zero at the rim.
-        const strength = Math.round(255 * (1 - d / r) ** 0.8);
-        const i = y * s + x;
-        if (strength > field[i]) field[i] = Math.min(255, field[i] + strength);
-      }
-    }
+  for (const k of SERVICE_KEYS) {
+    // With nobody to serve, a service that exists is serving everyone it has
+    // to. With nobody providing it, the answer is zero however small the city.
+    const ratio = pop > 0 ? clamp(capacity[k] / pop, 0, 1) : (capacity[k] > 0 ? 1 : 0);
+    world.coverage[k].fill(Math.round(ratio * 255));
+    world.stats.service[k] = { capacity: capacity[k], demand: pop, ratio };
   }
 }
 

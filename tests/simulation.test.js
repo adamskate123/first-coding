@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { World } from '../src/world.js';
-import { Z, ROAD, T, ZONE_INFO, WEALTH_THRESHOLDS, WEALTH_HYSTERESIS } from '../src/config.js';
+import { Z, ROAD, T, ZONE_INFO, BUILDINGS, WEALTH_THRESHOLDS, WEALTH_HYSTERESIS } from '../src/config.js';
 import { updateRoadAccess, updatePower } from '../src/sim/networks.js';
 import { updateCoverage, updateLandValue, updatePollution } from '../src/sim/fields.js';
 import { updateTraffic } from '../src/sim/traffic.js';
@@ -295,17 +295,57 @@ test('pollution spreads beyond the tile that emits it', () => {
   assert.ok(w.pollution[w.idx(22, 20)] < w.pollution[i], 'but less so with distance');
 });
 
-test('service coverage falls off with distance and stops at the radius', () => {
+test('a service covers the whole city, up to what it can handle', () => {
+  // Services are provided city-wide against a capacity rather than stamped as
+  // a disc: where a station stands no longer changes who it serves, only how
+  // many it can serve does.
   const w = flatWorld(40);
   w.placeBuilding('police', 20, 20);
   w.buildings[0].powered = true;
-  updateCoverage(w);
 
-  const near = w.coverage.police[w.idx(21, 20)];
-  const far = w.coverage.police[w.idx(30, 20)];
-  const outside = w.coverage.police[w.idx(39, 39)];
-  assert.ok(near > far, 'coverage weakens with distance');
-  assert.equal(outside, 0, 'and ends at the radius');
+  w.stats.population = BUILDINGS.police.capacity;
+  updateCoverage(w);
+  assert.equal(w.coverage.police[w.idx(21, 20)], 255, 'a city it can handle is fully covered');
+  assert.equal(w.coverage.police[w.idx(39, 39)], 255, 'including the far corner');
+  assert.equal(w.stats.service.police.ratio, 1);
+
+  // Twice the population it can handle, and half of them go without.
+  w.stats.population = BUILDINGS.police.capacity * 2;
+  updateCoverage(w);
+  assert.equal(w.stats.service.police.capacity, BUILDINGS.police.capacity);
+  assert.equal(w.stats.service.police.demand, BUILDINGS.police.capacity * 2);
+  assert.ok(Math.abs(w.stats.service.police.ratio - 0.5) < 0.001, 'half the city is covered');
+  assert.equal(w.coverage.police[w.idx(21, 20)], 128);
+});
+
+test('another station covers more of the city', () => {
+  const w = flatWorld(40);
+  w.stats.population = BUILDINGS.police.capacity * 2;
+  w.placeBuilding('police', 20, 20);
+  w.buildings[0].powered = true;
+  updateCoverage(w);
+  const one = w.stats.service.police.ratio;
+
+  w.placeBuilding('police', 30, 30);
+  w.buildings[1].powered = true;
+  updateCoverage(w);
+  assert.ok(w.stats.service.police.ratio > one, 'a second station serves more people');
+  assert.equal(w.stats.service.police.ratio, 1, 'and two is enough for this city');
+});
+
+test('civic buildings employ people', () => {
+  const w = flatWorld(40);
+  w.placeBuilding('school', 10, 10);
+  w.buildings[0].powered = true;
+  w.buildings[0].on = true;
+  tallyCity(w);
+  assert.equal(w.stats.jobsS, BUILDINGS.school.jobs);
+  assert.ok(w.stats.jobs >= BUILDINGS.school.jobs, 'and their jobs count towards the total');
+
+  // A building with no power is not staffed, so it employs nobody.
+  w.buildings[0].powered = false;
+  tallyCity(w);
+  assert.equal(w.stats.jobsS, 0);
 });
 
 test('an unpowered police station provides no coverage', () => {

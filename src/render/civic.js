@@ -34,8 +34,8 @@ import { hash2 } from '../util.js';
  * alone would guillotine it.
  */
 export const CIVIC_HEADROOM = {
-  coal: 54, gas: 34, solar: 10, police: 26, fire: 34,
-  clinic: 16, school: 30, park: 12, plaza: 18,
+  coal: 54, gas: 34, solar: 10, wind: 76, police: 26, fire: 34,
+  clinic: 16, hospital: 26, school: 30, park: 12, plaza: 18,
 };
 
 // ------------------------------------------------------------------ tools --
@@ -771,4 +771,174 @@ function plaza(ctx, ox, oy, spec, lit) {
   lamp(ctx, ox, oy, 1.35, 1.85, 16, lit);
 }
 
-const MODELS = { police, fire, clinic, school, coal, gas, solar, park, plaza };
+// ---------------------------------------------------------- later unlocks --
+
+/**
+ * A hospital: the clinic grown up.
+ *
+ * Deliberately built from the same parts as the clinic -- ribbon glazing, a
+ * canopy, a red cross on the deck -- because a player who has learnt to read
+ * one should read the other instantly. What separates them is scale and the
+ * ward tower, which is what actually distinguishes a hospital on a skyline.
+ */
+function hospital(ctx, ox, oy, spec, lit) {
+  const cream = spec.color;
+  const cross = '#c4453c';
+  const trim = '#9fb8c4';
+
+  groundShadowUV(ctx, ox, oy, 3, 3, spec.height);
+  plate(ctx, ox, oy, 0, 0, 3, 3, '#7d8a6e');
+  plate(ctx, ox, oy, 0.15, 1.9, 2.7, 1.05, '#8e9188');       // the ambulance court
+  groundLine(ctx, ox, oy, 0.3, 2.4, 2.8, 2.4, '#e2ded0', 1.2, [5, 4]);
+
+  // The podium: wards and clinics on three floors, running the full frontage.
+  const p = at(ox, oy, 0, 0);
+  const podium = isoSlab(ctx, p.x, p.y, 3, 1.85, 30, { wall: cream, roof: shade(cream, 0.8) });
+  for (const face of faces(podium)) {
+    for (let r = 0; r < 3; r++) {
+      const v0 = 6 + r * 8;
+      panel(ctx, face, 0.05, 0.95, v0, v0 + 5,
+        lit ? mix(trim, WINDOW_LIT, 0.78) : shade(trim, face.tint));
+      panel(ctx, face, 0.05, 0.95, v0 + 5, v0 + 6, shade(cream, face.tint * 0.86));
+    }
+  }
+  ctx.fillStyle = shade(cream, 1.1);
+  rhombusUV(ctx, p.x, p.y, 3, 1.85, 30);
+  ctx.fill();
+
+  // The ward tower, set back on the podium.
+  const t = at(ox, oy, 0.35, 0.3);
+  const tower = isoSlab(ctx, t.x, t.y, 1.9, 1.1, spec.height - 30, { wall: cream, roof: '#8e9294' });
+  for (const face of faces(tower)) {
+    const n = Math.max(4, Math.round(face.len / 8));
+    for (let r = 0; r < 5; r++) {
+      const v0 = 4 + r * 9;
+      if (v0 + 5 > spec.height - 34) break;
+      for (let k = 0; k < n; k++) {
+        const c = (k + 0.5) / n, half = 3 / face.len;
+        const on = lit && hash2(k, r, 613) % 100 < 74;      // a hospital is never dark
+        panel(ctx, face, c - half, c + half, v0, v0 + 5,
+          on ? mix(trim, WINDOW_LIT, 0.85) : shade(trim, face.tint));
+      }
+    }
+  }
+
+  // A helipad on the tower: the one thing only a hospital has.
+  const deck = spec.height;
+  ctx.fillStyle = '#6f7377';
+  rhombusUV(ctx, t.x, t.y, 1.9, 1.1, deck);
+  ctx.fill();
+  const pad = at(ox, oy, 1.3, 0.85);
+  ctx.fillStyle = '#5a5e62';
+  ctx.beginPath();
+  ctx.ellipse(pad.x, pad.y - deck, 17, 8.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = lit ? '#ffe9a8' : '#e8e4d6';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.ellipse(pad.x, pad.y - deck, 13, 6.5, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  // The H, painted in the plane of the deck: two uprights and a crossbar,
+  // rather than one polygon traced by hand into something nobody could read.
+  const HU = 1.3, HV = 0.85, ARM = 0.26, THICK = 0.06, GAP = 0.15;
+  for (const d of [-GAP, GAP]) {
+    flatShape(ctx, ox, oy, [
+      [HU + d - THICK, HV - ARM], [HU + d + THICK, HV - ARM],
+      [HU + d + THICK, HV + ARM], [HU + d - THICK, HV + ARM],
+    ], deck, '#e8e4d6');
+  }
+  flatShape(ctx, ox, oy, [
+    [HU - GAP, HV - THICK], [HU + GAP, HV - THICK],
+    [HU + GAP, HV + THICK], [HU - GAP, HV + THICK],
+  ], deck, '#e8e4d6');
+  if (lit) {
+    for (const [hu, hv] of [[1.05, 0.6], [1.62, 1.1]]) {
+      const q = at(ox, oy, hu, hv);
+      ctx.fillStyle = '#ff7a68';
+      ctx.beginPath(); ctx.arc(q.x, q.y - deck, 1.6, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // The cross, on the podium roof where the tower does not cover it.
+  flatShape(ctx, ox, oy, crossPoints(2.45, 1.0, 0.42, 0.15), 30, shade(cross, 0.94));
+  flatShape(ctx, ox, oy, crossPoints(2.45, 1.0, 0.34, 0.11), 30, cross);
+
+  // Entrance canopy over the ambulance bay.
+  for (const [pu, pv] of [[0.4, 1.9], [2.1, 1.9], [0.4, 2.5], [2.1, 2.5]]) {
+    const q = at(ox, oy, pu, pv);
+    ctx.fillStyle = '#8c8f92';
+    ctx.fillRect(q.x - 1, q.y - 14, 2, 14);
+  }
+  const canopy = at(ox, oy, 0.4, 1.88);
+  isoSlab(ctx, canopy.x, canopy.y - 14, 1.75, 0.64, 3,
+    { wall: shade(cream, 0.92), roof: shade('#e6e2d8', 1.0) });
+  parkedCar(ctx, ox, oy, 0.75, 2.1, '#eceee9', cross, lit ? '#7fc4ff' : '#8fa8c4');
+  parkedCar(ctx, ox, oy, 1.5, 2.35, '#eceee9', cross, lit ? '#ff8f7a' : '#c07068');
+  lamp(ctx, ox, oy, 2.85, 2.85, 17, lit);
+}
+
+/**
+ * A wind farm: three turbines on open ground.
+ *
+ * Nothing else in the game is this tall and this thin, which is the whole
+ * point -- a renewable plant should be legible from across the map without
+ * being a building at all.
+ */
+function wind(ctx, ox, oy, spec, lit) {
+  plate(ctx, ox, oy, 0, 0, 3, 3, '#7c9455');
+  // Mown access tracks between the bases.
+  groundLine(ctx, ox, oy, 0.4, 0.5, 2.5, 2.4, '#a8a184', 3);
+  groundLine(ctx, ox, oy, 2.5, 0.6, 0.6, 2.5, '#a8a184', 2.4);
+
+  // Back to front, so a nearer tower's blades pass in front of a further one.
+  const towers = [[0.55, 0.5, 58], [2.35, 0.85, 48], [1.25, 2.2, 68]];
+  towers.sort((a, b) => (a[0] + a[1]) - (b[0] + b[1]));
+  for (const [u, v, h] of towers) {
+    const p = at(ox, oy, u, v);
+    isoCylinder(ctx, p.x, p.y, 0.16, h, { wall: '#dfe2e5', roof: '#b6bbc0' }, 0.55);
+    const hubX = p.x, hubY = p.y + (0.16 * TILE_H) / 2 - h;
+
+    // The nacelle, then three blades at a fixed angle -- fixed because the
+    // sprite is cached, and a turbine that changes pose between two lots of
+    // the same design would read as an error rather than as motion.
+    ctx.fillStyle = '#c9ced3';
+    ctx.beginPath();
+    ctx.ellipse(hubX + 2, hubY, 5, 2.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Blades are rotated by hand rather than with a canvas transform. Under a
+    // transform every coordinate the drawing code emits is in blade space, so
+    // nothing downstream -- the sprite bounds check included -- can tell where
+    // on the canvas the blade actually lands.
+    const phase = (u * 3.1 + v * 1.7) % (Math.PI * 2 / 3);
+    for (let k = 0; k < 3; k++) {
+      const a = phase + (k * Math.PI * 2) / 3;
+      const cos = Math.cos(a), sin = Math.sin(a);
+      const P = (bx, by) => ({ x: hubX + bx * cos - by * sin, y: hubY + bx * sin + by * cos });
+      const root0 = P(0, -1.6), tipA = P(16, -2.4), tip = P(30, -0.6);
+      const tipB = P(16, 1.2), root1 = P(0, 1.6);
+      ctx.fillStyle = k === 0 ? '#eef1f3' : '#dde1e5';
+      ctx.beginPath();
+      ctx.moveTo(root0.x, root0.y);
+      ctx.quadraticCurveTo(tipA.x, tipA.y, tip.x, tip.y);
+      ctx.quadraticCurveTo(tipB.x, tipB.y, root1.x, root1.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+    if (lit) {
+      ctx.fillStyle = '#ff7a68';
+      ctx.beginPath(); ctx.arc(hubX, hubY - 3, 1.4, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // A substation, so the farm is connected to something.
+  const sub = at(ox, oy, 2.5, 2.55);
+  isoBox(ctx, sub.x, sub.y, 0.45, 8, { wall: '#a9a798', roof: '#7d7c70' });
+  const tr = at(ox, oy, 2.95, 2.2);
+  isoBox(ctx, tr.x, tr.y, 0.26, 6, { wall: '#8d9298', roof: '#5f646a' });
+  if (lit) {
+    ctx.fillStyle = 'rgba(255, 226, 150, 0.8)';
+    ctx.fillRect(sub.x - 2, sub.y - 5, 3, 2);
+  }
+}
+
+const MODELS = { police, fire, clinic, hospital, school, coal, gas, solar, wind, park, plaza };

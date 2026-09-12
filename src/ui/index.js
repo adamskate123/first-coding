@@ -85,11 +85,19 @@ export class UI {
           `<span><i class="swatch" style="background:${item.swatch}"></i>${item.label}</span>` +
           `<span class="cost">${item.cost ? '$' + commas(item.cost) : ''}</span>`;
         btn.addEventListener('click', () => {
+          if (btn.classList.contains('locked')) {
+            this.game.toast(`${item.label} is not available until ${item.from}.`);
+            return;
+          }
           this.game.tools.select(item.tool, item.arg ?? null);
           this.setActiveTool(item.tool);
           document.getElementById('status-tool').textContent = item.label;
         });
         btn.dataset.tool = item.tool;
+        if (item.from) {
+          btn.dataset.from = item.from;
+          btn.dataset.cost = item.cost ? '$' + commas(item.cost) : '';
+        }
         wrap.appendChild(btn);
         this.toolButtons.push(btn);
       }
@@ -100,11 +108,35 @@ export class UI {
     function catalogue(category) {
       return Object.entries(BUILDINGS)
         .filter(([, spec]) => spec.category === category)
+        .sort((a, b) => (a[1].from || 0) - (b[1].from || 0))
         .map(([key, spec]) => ({
           label: spec.name.replace(' Power Plant', ' Plant'),
           cost: spec.cost, tool: `build:${key}`, arg: key, swatch: spec.color,
-          title: `${spec.name} - ${spec.span}x${spec.span} tiles, ${money(spec.upkeep)}/month`,
+          from: spec.from,
+          title: spec.from
+            ? `${spec.name} - available from ${spec.from}`
+            : `${spec.name} - ${spec.span}x${spec.span} tiles, ${money(spec.upkeep)}/month`,
         }));
+    }
+  }
+
+  /**
+   * Grey out what the calendar has not reached yet.
+   *
+   * Cheap enough to run on every refresh, and doing it there rather than only
+   * at the turn of the year means a loaded city shows the right catalogue on
+   * its first frame instead of on its next new year.
+   */
+  refreshLocks(year) {
+    if (year === this.lockedYear) return;
+    this.lockedYear = year;
+    for (const btn of this.toolButtons) {
+      const from = Number(btn.dataset.from);
+      if (!from) continue;
+      const locked = year < from;
+      btn.classList.toggle('locked', locked);
+      const cost = btn.querySelector('.cost');
+      if (cost) cost.textContent = locked ? String(from) : (btn.dataset.cost || '');
     }
   }
 
@@ -209,6 +241,8 @@ export class UI {
     const w = this.game.world;
     const st = w.stats;
 
+    this.refreshLocks(w.year);
+
     const funds = document.getElementById('stat-funds');
     funds.textContent = money(w.funds);
     funds.classList.toggle('negative', w.funds < 0);
@@ -307,11 +341,31 @@ export class UI {
     rows.push(row('Congestion', `${Math.round((st.congestion || 0) * 100)}%`));
     rows.push(meter(clamp(st.congestion || 0, 0, 1), st.congestion > 0.8 ? 'var(--bad)' : 'var(--good)'));
 
-    rows.push('<div class="subhead">Service coverage</div>');
+    rows.push('<div class="subhead">Services</div>');
     for (const k of SERVICE_KEYS) {
-      const v = this.coverageOfPopulation(k);
-      rows.push(row(SERVICE_LABEL[k], `${Math.round(v * 100)}%`));
-      rows.push(meter(v, v > 0.6 ? 'var(--good)' : v > 0.3 ? 'var(--accent)' : 'var(--bad)'));
+      const svc = st.service[k] || { capacity: 0, demand: st.population, ratio: 0 };
+      const v = svc.ratio;
+      rows.push(row(SERVICE_LABEL[k],
+        `${commas(Math.min(svc.capacity, svc.demand))} / ${commas(svc.demand)}`));
+      rows.push(meter(v, v > 0.85 ? 'var(--good)' : v > 0.5 ? 'var(--accent)' : 'var(--bad)'));
+      const shortBy = svc.demand - svc.capacity;
+      if (shortBy > 0 && st.population > 0) {
+        rows.push(`<div class="row hint"><span class="k">${commas(shortBy)} not covered</span></div>`);
+      }
+    }
+
+    rows.push('<div class="subhead">Demand</div>');
+    const why = w.demand.why || { R: [], C: [], I: [] };
+    for (const [k, label] of [['R', 'Residential'], ['C', 'Commercial'], ['I', 'Industrial']]) {
+      const v = clamp(w.demand[k], -1, 1);
+      rows.push(row(label, v > 0.15 ? 'Growing' : v < -0.15 ? 'Shrinking' : 'Steady'));
+      rows.push(meter((v + 1) / 2, v > 0.15 ? 'var(--good)' : v < -0.15 ? 'var(--bad)' : 'var(--accent)'));
+      for (const term of (why[k] || []).slice(0, 2)) {
+        const sign = term.v >= 0 ? '+' : '-';
+        const tone = term.v >= 0 ? 'var(--good)' : 'var(--bad)';
+        rows.push(`<div class="row hint"><span class="k">${term.label}</span>`
+          + `<span class="v" style="color:${tone}">${sign}</span></div>`);
+      }
     }
 
     rows.push('<div class="subhead">Treasury</div>');
@@ -320,20 +374,6 @@ export class UI {
     rows.push(row('Net', money(st.lastBalance)));
 
     return rows.join('');
-  }
-
-  coverageOfPopulation(key) {
-    const w = this.game.world;
-    const n = w.size * w.size;
-    const field = w.coverage[key];
-    let weighted = 0, people = 0;
-    for (let i = 0; i < n; i++) {
-      const p = w.pop[i];
-      if (!p) continue;
-      weighted += (field[i] / 255) * p;
-      people += p;
-    }
-    return people ? weighted / people : 0;
   }
 
   tileReport(x, y, i) {
@@ -348,7 +388,8 @@ export class UI {
       rows.push(row('Footprint', `${spec.span}x${spec.span}`));
       rows.push(row('Upkeep', `${money(spec.upkeep)}/mo`));
       if (spec.supply) rows.push(row('Output', `${commas(spec.supply)} MW`));
-      if (spec.service) rows.push(row('Radius', `${spec.radius} tiles`));
+      if (spec.service) rows.push(row('Serves', `${commas(spec.capacity)} people`));
+      if (spec.jobs) rows.push(row('Staff', commas(spec.jobs)));
       rows.push(row('Powered', b.powered ? 'Yes' : 'No'));
     } else if (w.zone[i]) {
       const info = ZONE_INFO[w.zone[i]];
