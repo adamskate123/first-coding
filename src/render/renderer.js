@@ -10,7 +10,8 @@
  * there is no reason to burn a frame re-painting an unchanged skyline.
  */
 
-import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, ROAD_INFO, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE, DAY_TICKS, ROAD_REACH } from '../config.js';
+import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, ROAD_INFO, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE, DAY_TICKS, ROAD_REACH,
+         LANE_ROW_PITCH, LANE_ROW_OFFSET, LANE_COL_PITCH, LANE_COL_OFFSET } from '../config.js';
 import { tileToWorld, tileQuad, flatQuad, quadPoint } from '../iso.js';
 import { TERRAIN, ROAD_COLORS, ZONE_TINT, ZONE_EDGE, ZONE_GROUND, SKY, LOT, VEHICLE_TONES, heatColor, shade, mix } from './palette.js';
 import { zoneSprite, buildingSprite, siteSprite, treeSprite, VARIANTS } from './sprites.js';
@@ -750,12 +751,27 @@ export class Renderer {
     const ctx = this.ctx;
     const w = this.world;
     const centre = quadCentre(quad);
-    const arms = [];
+
+    // Which way this piece of street runs. Towards every neighbour that
+    // already carries a road, and also along its own lattice line whether or
+    // not the next stretch has been laid yet.
+    //
+    // Drawing only towards what exists turned every growing tip into a
+    // lollipop -- a stub with a blob on the end -- and a half-laid network
+    // into a scatter of grey chunks with no direction to them. The lattice
+    // knows which way the street goes, so one tile of it reads as a piece of
+    // street rather than as a patch.
+    const open = [false, false, false, false];
     for (let k = 0; k < 4; k++) {
       const nx = x + DIRS[k][0], ny = y + DIRS[k][1];
-      if (!w.inBounds(nx, ny) || !w.road[w.idx(nx, ny)]) continue;
-      arms.push(quadEdgeMid(quad, k));
+      if (w.inBounds(nx, ny) && w.road[w.idx(nx, ny)]) open[k] = true;
     }
+    if (y % LANE_ROW_PITCH === LANE_ROW_OFFSET) { open[0] = true; open[2] = true; }
+    if (x % LANE_COL_PITCH === LANE_COL_OFFSET) { open[1] = true; open[3] = true; }
+    if (!open.some(Boolean)) { open[0] = true; open[2] = true; }
+
+    const arms = [];
+    for (let k = 0; k < 4; k++) if (open[k]) arms.push(quadEdgeMid(quad, k));
 
     const load = w.traffic[i] / ROAD_INFO[ROAD.LANE].capacity;
     const strain = clamp((load - 0.4) / 0.8, 0, 1);
@@ -765,14 +781,6 @@ export class Renderer {
 
     const band = (half, fill) => {
       ctx.fillStyle = fill;
-      // A stub where nothing connects, so a lane just laid is visible before
-      // the next stretch reaches it.
-      if (!arms.length) {
-        ctx.beginPath();
-        ctx.ellipse(centre.x, centre.y, half * 2, half, 0, 0, Math.PI * 2);
-        ctx.fill();
-        return;
-      }
       for (const edge of arms) {
         const dx = edge.x - centre.x, dy = edge.y - centre.y;
         const len = Math.hypot(dx, dy) || 1;
@@ -800,7 +808,6 @@ export class Renderer {
     // No centre line -- a residential street of this width would not carry
     // one -- but the kerb edge catches the light, and that is the detail that
     // says "kerb" rather than "the tarmac stops here".
-    if (!arms.length) return;
     ctx.strokeStyle = shade(ROAD_COLORS.laneKerb, 1.12);
     ctx.lineWidth = 0.8;
     ctx.beginPath();
@@ -1174,7 +1181,10 @@ export class Renderer {
     // A garden stops short of the road; a yard or forecourt is paved to the
     // lot line, so neighbouring commercial and industrial lots run together
     // into one continuous surface the way a trading estate does.
-    const inset = category === 'R' ? 0.92 : 1;
+    // Only a hairline of unmown ground at the lot line. At 0.92 the margins of
+    // every plot in a district joined into a continuous tan grid between the
+    // lawns, which is one more thing that read as a network of paths.
+    const inset = category === 'R' ? 0.97 : 1;
     const pad = quadInset(quad, inset);
     ctx.fillStyle = surface;
     this.quadPath(pad);
@@ -1192,14 +1202,19 @@ export class Renderer {
 
     // The drive is drawn as a wedge widest at the street, because the building
     // sits over the middle of the lot and would hide an even-width strip.
+    //
+    // Kept narrow and close to the lawn it crosses. Every plot fronts a street
+    // now, so every plot draws one of these, and at the width and contrast
+    // they were first given a district came out as a scatter of pale slabs
+    // between the houses -- read, reasonably, as bits of broken road.
     const edge = quadEdgeMid(quad, k);
     const centre = quadCentre(quad);
     const along = { x: centre.x - edge.x, y: centre.y - edge.y };
     const across = { x: -along.y, y: along.x };   // perpendicular, in screen space
-    const wide = category === 'R' ? 0.30 : 0.62;
+    const wide = category === 'R' ? 0.17 : 0.55;
     const narrow = wide * 0.45;
 
-    ctx.fillStyle = category === 'R' ? LOT.drive : shade(surface, 1.16);
+    ctx.fillStyle = category === 'R' ? mix(LOT.drive, surface, 0.45) : shade(surface, 1.12);
     ctx.beginPath();
     ctx.moveTo(edge.x + across.x * wide, edge.y + across.y * wide);
     ctx.lineTo(edge.x - across.x * wide, edge.y - across.y * wide);
