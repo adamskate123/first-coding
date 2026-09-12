@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { World } from '../src/world.js';
 import { Z, ROAD, T, ERAS, START_YEAR, eraFor } from '../src/config.js';
 import { updateGrowth } from '../src/sim/growth.js';
+import { updateDevelopment } from '../src/sim/development.js';
 import { buildingRecipe, VARIANTS, spriteCacheSize } from '../src/render/sprites.js';
 import { buildingPalette, applyEra, mix } from '../src/render/palette.js';
 import { serialize, deserialize } from '../src/save.js';
@@ -26,6 +27,20 @@ function flatWorld(size = 20) {
   w.tree.fill(0);
   w._waterDist = null;
   return w;
+}
+
+/**
+ * One step of the development cycle.
+ *
+ * Growth breaks ground and construction finishes the job, so a lot only
+ * reaches its next level once both have run. Driving growth alone -- which is
+ * all these tests used to do -- now starts a building site and leaves it
+ * standing there.
+ */
+function develop(w, rng) {
+  updateGrowth(w, rng);
+  updateDevelopment(w, rng);
+  w.tick++;
 }
 
 /** A lot primed to grow on the next tick. */
@@ -69,7 +84,7 @@ test('a lot records the year it is built', () => {
   const i = readyLot(w, 5, 5);
 
   const rng = makeRng(1);
-  for (let k = 0; k < 80 && w.level[i] === 0; k++) updateGrowth(w, rng);
+  for (let k = 0; k < 960; k++) { if (w.level[i] !== 0) break; develop(w, rng); }
 
   assert.ok(w.level[i] > 0, 'the lot developed');
   assert.equal(w.builtYear(i), 1926);
@@ -84,12 +99,12 @@ test('a lot keeps its period as it grows', () => {
   w.year = 1930;
   const i = readyLot(w, 5, 5, Z.R_HIGH);
   const rng = makeRng(2);
-  for (let k = 0; k < 80 && w.level[i] === 0; k++) updateGrowth(w, rng);
+  for (let k = 0; k < 960; k++) { if (w.level[i] !== 0) break; develop(w, rng); }
   assert.equal(w.builtYear(i), 1930);
 
   w.year = 2010;
   const wasLevel = w.level[i];
-  for (let k = 0; k < 200 && w.level[i] === wasLevel; k++) updateGrowth(w, rng);
+  for (let k = 0; k < 2400; k++) { if (w.level[i] !== wasLevel) break; develop(w, rng); }
   assert.ok(w.level[i] > wasLevel, 'the lot grew');
   assert.equal(w.builtYear(i), 1930, 'but kept the period it was founded in');
 });
@@ -101,13 +116,13 @@ test('clearing a lot lets it be rebuilt in the present day', () => {
   w.year = 1912;
   const i = readyLot(w, 7, 7);
   const rng = makeRng(8);
-  for (let k = 0; k < 80 && w.level[i] === 0; k++) updateGrowth(w, rng);
+  for (let k = 0; k < 960; k++) { if (w.level[i] !== 0) break; develop(w, rng); }
   assert.equal(w.builtYear(i), 1912);
 
   w.clearTile(7, 7);
   w.year = 2005;
   readyLot(w, 7, 7);
-  for (let k = 0; k < 80 && w.level[i] === 0; k++) updateGrowth(w, rng);
+  for (let k = 0; k < 960; k++) { if (w.level[i] !== 0) break; develop(w, rng); }
   assert.equal(w.builtYear(i), 2005, 'the replacement is of its own time');
 });
 
@@ -116,14 +131,14 @@ test('a building that empties out keeps the period it went up in', () => {
   w.year = 1935;
   const i = readyLot(w, 5, 5);
   const rng = makeRng(3);
-  for (let k = 0; k < 80 && w.level[i] === 0; k++) updateGrowth(w, rng);
+  for (let k = 0; k < 960; k++) { if (w.level[i] !== 0) break; develop(w, rng); }
   const built = w.builtYear(i);
 
   // Cut the power and let it decay: same building, just emptying.
   w.year = 2020;
   w.powered[i] = 0;
   const wasLevel = w.level[i];
-  for (let k = 0; k < 300 && w.level[i] === wasLevel; k++) updateGrowth(w, rng);
+  for (let k = 0; k < 3600; k++) { if (w.level[i] !== wasLevel) break; develop(w, rng); }
 
   assert.ok(w.level[i] < wasLevel, 'the lot decayed');
   assert.equal(w.builtYear(i), built, 'decay is not a rebuild');
@@ -134,7 +149,7 @@ test('bulldozing clears the build year', () => {
   w.year = 1950;
   const i = readyLot(w, 6, 6);
   const rng = makeRng(4);
-  for (let k = 0; k < 80 && w.level[i] === 0; k++) updateGrowth(w, rng);
+  for (let k = 0; k < 960; k++) { if (w.level[i] !== 0) break; develop(w, rng); }
   w.clearTile(6, 6);
   assert.equal(w.builtAge[i], 0);
 });

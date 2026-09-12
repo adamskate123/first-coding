@@ -13,12 +13,31 @@
 import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, ROAD_INFO, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE, DAY_TICKS } from '../config.js';
 import { tileToWorld, tileQuad, flatQuad, quadPoint } from '../iso.js';
 import { TERRAIN, ROAD_COLORS, ZONE_TINT, ZONE_EDGE, ZONE_GROUND, SKY, LOT, VEHICLE_TONES, heatColor, shade, mix } from './palette.js';
-import { zoneSprite, buildingSprite, treeSprite, VARIANTS } from './sprites.js';
+import { zoneSprite, buildingSprite, siteSprite, treeSprite, VARIANTS } from './sprites.js';
 import { vehicleLocal, KIND_SIZE } from '../sim/vehicles.js';
 import { hash2, clamp } from '../util.js';
 
 /** Neighbour offsets, indexed the same way as frontage() and quadEdgeMid(). */
 const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+
+/**
+ * Roughly how tall the building now going up on a lot will stand.
+ *
+ * Only used to scale the site: a plot that will carry a tower gets a crane and
+ * a steel frame, one that will carry a house gets neither. Guessed from the
+ * zone's own capacity curve rather than from the sprite generator, because the
+ * sprite for a building that does not exist yet cannot be asked.
+ */
+export function siteTarget(info, level) {
+  const cap = info.cap[Math.min(level, info.cap.length - 1)] || 6;
+  return Math.round(10 + Math.sqrt(cap) * 5.5);
+}
+
+/** Below this, a job is small enough that a tower crane would look absurd. */
+const CRANE_HEIGHT = 42;
+
+/** Half-width of a developer's lane, which is narrower than a street. */
+const LANE_HALF = 8;
 
 /** Tiles between a bridge's piers, and posts per railing run. */
 const PIER_SPACING = 3;
@@ -404,6 +423,16 @@ export class Renderer {
         const sp = buildingSprite(b.type, b.powered && this.windowsLit());
         ctx.drawImage(sp.canvas, origin.x + sp.ox, origin.y + sp.oy);
       }
+    } else if (zone !== Z.NONE && w.stage[i] > 0 && w.level[i] === 0) {
+      // A plot being built out for the first time is a building site, not a
+      // building. Once there is something standing on it an upgrade leaves the
+      // old building in place and puts a crane beside it instead -- redrawing
+      // an occupied lot as bare ground would mean a district that is still
+      // housing people looking like a district that has been cleared.
+      const info = ZONE_INFO[zone];
+      const sp = siteSprite(w.stage[i], siteTarget(info, 1), hash2(x, y, 23),
+        1, this.windowsLit());
+      ctx.drawImage(sp.canvas, p.x + sp.ox, p.y + sp.oy);
     } else if (zone !== Z.NONE && w.level[i] > 0) {
       const info = ZONE_INFO[zone];
       const block = mergedBlock(w, x, y);
@@ -426,6 +455,7 @@ export class Renderer {
       const lit = w.powered[i] === 1 && this.windowsLit();
       const sp = zoneSprite(info.key, w.level[i], variant, w.wealth[i], w.eraOf(i), lit);
       ctx.drawImage(sp.canvas, p.x + sp.ox, p.y + sp.oy);
+      if (w.stage[i] > 0) this.drawWorksUnderway(p, info, w.level[i], hash2(x, y, 23));
 
       if (w.powered[i] !== 1) this.drawNoPowerMark(p);
     }
@@ -525,6 +555,7 @@ export class Renderer {
   drawRoad(x, y, i, quad) {
     const ctx = this.ctx;
     const w = this.world;
+    if (w.road[i] === ROAD.LANE) { this.drawLane(x, y, i, quad); return; }
     const isAvenue = w.road[i] === ROAD.AVENUE;
 
     // The carriageway is the tile's own surface, so a road rides the slope
@@ -636,6 +667,124 @@ export class Renderer {
     if (arms.length === 2 && (arms[0].k + 2) % 4 === arms[1].k) {
       band(MEDIAN_HALF - 2.1, ROAD_COLORS.planting);
     }
+  }
+
+  /**
+   * A crane beside a building that is being rebuilt.
+   *
+   * Redevelopment of an occupied lot has to read as work in progress without
+   * hiding the building that is still standing on it, so the site treatment
+   * is reduced to the one element that says "under construction" from any
+   * distance.
+   */
+  drawWorksUnderway(p, info, level, seed) {
+    const ctx = this.ctx;
+    const target = siteTarget(info, Math.min(level + 1, info.cap.length - 1));
+
+    // A tower crane over a two-storey house is absurd, and a district of
+    // semis being improved was a forest of them. Small jobs get what a small
+    // job actually has: a scaffold up one side and a skip on the verge.
+    if (target < CRANE_HEIGHT) {
+      const sx = p.x - TILE_W * 0.2, sy = p.y + TILE_H * 0.62;
+      ctx.strokeStyle = '#b8aa83';
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      for (let k = 0; k <= 2; k++) {
+        const px = sx + k * 7, py = sy + k * 3.5;
+        ctx.moveTo(px, py); ctx.lineTo(px, py - 16);
+      }
+      for (let lvl = 1; lvl <= 2; lvl++) {
+        ctx.moveTo(sx, sy - lvl * 7);
+        ctx.lineTo(sx + 14, sy + 7 - lvl * 7);
+      }
+      ctx.stroke();
+      const skip = { x: p.x + TILE_W * 0.26, y: p.y + TILE_H * 0.74 };
+      ctx.fillStyle = '#9a6a3a';
+      ctx.fillRect(skip.x - 5, skip.y - 4, 10, 5);
+      ctx.fillStyle = '#7d5730';
+      ctx.fillRect(skip.x - 5, skip.y - 5, 10, 1.5);
+      return;
+    }
+
+    const mast = Math.round(target * 1.05) + 12;
+    const bx = p.x + TILE_W * 0.34, by = p.y + TILE_H * 0.72;
+    ctx.strokeStyle = '#d8a53f';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx, by - mast);
+    ctx.stroke();
+    const jib = 26;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(bx - jib * 0.35, by - mast + 3);
+    ctx.lineTo(bx + jib, by - mast - 2);
+    ctx.stroke();
+    ctx.fillStyle = '#6f6a60';
+    ctx.fillRect(bx - jib * 0.4, by - mast + 1, 6, 5);
+    ctx.strokeStyle = '#8d8a80';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(bx + jib * 0.6, by - mast - 1);
+    ctx.lineTo(bx + jib * 0.6, by - mast + 14 + (seed % 7));
+    ctx.stroke();
+  }
+
+  /**
+   * A developer's lane.
+   *
+   * Drawn as a band from the middle of the tile out to each connected edge
+   * rather than as a full-tile carriageway, so it comes out narrower than a
+   * street and the ground it was cut through still shows either side. That is
+   * the whole visual difference between a road the city laid and a road a
+   * developer put in to reach the backs of its plots, and it is enough.
+   */
+  drawLane(x, y, i, quad) {
+    const ctx = this.ctx;
+    const w = this.world;
+    const centre = quadCentre(quad);
+    const arms = [];
+    for (let k = 0; k < 4; k++) {
+      const nx = x + DIRS[k][0], ny = y + DIRS[k][1];
+      if (!w.inBounds(nx, ny) || !w.road[w.idx(nx, ny)]) continue;
+      arms.push(quadEdgeMid(quad, k));
+    }
+
+    const load = w.traffic[i] / ROAD_INFO[ROAD.LANE].capacity;
+    const strain = clamp((load - 0.4) / 0.8, 0, 1);
+    const surface = strain > 0
+      ? mix(ROAD_COLORS.lane, ROAD_COLORS.congested, strain * 0.6)
+      : ROAD_COLORS.lane;
+
+    const band = (half, fill) => {
+      ctx.fillStyle = fill;
+      // A stub where nothing connects, so a lane just laid is visible before
+      // the next stretch reaches it.
+      if (!arms.length) {
+        ctx.beginPath();
+        ctx.ellipse(centre.x, centre.y, half * 2, half, 0, 0, Math.PI * 2);
+        ctx.fill();
+        return;
+      }
+      for (const edge of arms) {
+        const dx = edge.x - centre.x, dy = edge.y - centre.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const px = -dy / len * half, py = dx / len * half;
+        ctx.beginPath();
+        ctx.moveTo(centre.x + px, centre.y + py);
+        ctx.lineTo(edge.x + px, edge.y + py);
+        ctx.lineTo(edge.x - px, edge.y - py);
+        ctx.lineTo(centre.x - px, centre.y - py);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.ellipse(centre.x, centre.y, half * 2, half, 0, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    band(LANE_HALF, ROAD_COLORS.laneEdge);
+    band(LANE_HALF - 1.6, surface);
   }
 
   /**

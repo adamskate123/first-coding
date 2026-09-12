@@ -33,6 +33,7 @@ import {
 } from './volumes.js';
 import { civicSprite, CIVIC_HEADROOM } from './civic.js';
 import { isWorks, drawWorks, worksHeight, worksHeadroom } from './works.js';
+import { drawSite } from './site.js';
 
 const PAD = 10;
 
@@ -548,7 +549,7 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1) 
   return cacheSet(key, { canvas, ox: -ox, oy: -oy });
 }
 
-/** Sprite for a placed service building. */
+
 /**
  * Sprite for a placed service building.
  *
@@ -559,6 +560,29 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1) 
  * box-and-windows treatment, so adding a new catalogue entry never leaves a
  * hole in the map while its art is being drawn.
  */
+/**
+ * Sprite for a plot under construction.
+ *
+ * Keyed on the stage and on roughly what will stand here when it is done, so
+ * a site for a tower gets a crane and a steel frame while a site for a house
+ * gets neither.
+ */
+export function siteSprite(stage, targetHeight, seed, span = 1, lit = false) {
+  const h = Math.min(160, Math.max(8, Math.round(targetHeight / 6) * 6));
+  const key = `s:${stage}:${h}:${seed % 8}:${span}:${lit ? 1 : 0}`;
+  const hit = cacheGet(key);
+  if (hit) return hit;
+
+  const totalH = Math.round(h * 1.15) + 60;
+  const w = span * TILE_W + PAD * 2 + SIDE * 2;
+  const canvas = makeCanvas(w, span * TILE_H + totalH + PAD * 2 + FOOT);
+  const ctx = canvas.getContext('2d');
+  const ox = w / 2, oy = totalH + PAD;
+  drawSite(ctx, ox, oy, stage, h, seed, span, lit);
+  return cacheSet(key, { canvas, ox: -ox, oy: -oy });
+}
+
+/** Sprite for a placed service building. */
 export function buildingSprite(type, lit) {
   const key = `b:${type}:${lit ? 1 : 0}`;
   const hit = cacheGet(key);

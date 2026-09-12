@@ -29,6 +29,9 @@ export const ROAD_COLORS = {
   // before its markings are legible.
   avenue: '#5b5852',
   markings: '#c9c2a8',
+  // A developer's lane: laid cheap, worn at the edges, no markings at all.
+  lane: '#8a8375',
+  laneEdge: '#756f63',
   // A divided carriageway's median: kerbed, and planted where there is room.
   median: '#9d9787',
   medianEdge: '#7d7868',

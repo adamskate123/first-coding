@@ -13,6 +13,7 @@ import { updateCoverage, updatePollution, updateCrime, updateLandValue, primePre
 import { updateTraffic } from './traffic.js';
 import { updateDemand } from './demand.js';
 import { updateGrowth, tallyCity } from './growth.js';
+import { updateDevelopment } from './development.js';
 import { monthlyBudget } from './economy.js';
 import { makeRng } from '../util.js';
 
@@ -65,6 +66,7 @@ export class Simulation {
     if (t % 10 === 0) updateTraffic(w);
 
     updateGrowth(w, this.rng);
+    updateDevelopment(w, this.rng);
     tallyCity(w);
     if (t % 4 === 0) updateDemand(w);
 
