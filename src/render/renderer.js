@@ -444,7 +444,8 @@ export class Renderer {
         if (x !== block.ox + block.span - 1 || y !== block.oy + block.span - 1) return;
         const lit = block.powered === 1 && this.windowsLit();
         const variant = hash2(block.ox, block.oy, 11) % VARIANTS;
-        const sp = zoneSprite(info.key, block.level, variant, block.wealth, block.era, lit, block.span);
+        const sp = zoneSprite(info.key, block.level, variant, block.wealth, block.era, lit,
+          block.span, this.blockFrontage(block));
         const origin = tileToWorld(block.ox, block.oy, this.blockHeight(block));
         ctx.drawImage(sp.canvas, origin.x + sp.ox, origin.y + sp.oy);
         if (block.powered !== 1) this.drawNoPowerMark(p);
@@ -453,7 +454,8 @@ export class Renderer {
 
       const variant = hash2(x, y, 11) % VARIANTS;
       const lit = w.powered[i] === 1 && this.windowsLit();
-      const sp = zoneSprite(info.key, w.level[i], variant, w.wealth[i], w.eraOf(i), lit);
+      const sp = zoneSprite(info.key, w.level[i], variant, w.wealth[i], w.eraOf(i), lit,
+        1, this.facing(x, y));
       ctx.drawImage(sp.canvas, p.x + sp.ox, p.y + sp.oy);
       if (w.stage[i] > 0) this.drawWorksUnderway(p, info, w.level[i], hash2(x, y, 23));
 
@@ -783,8 +785,30 @@ export class Renderer {
       ctx.fill();
     };
 
-    band(LANE_HALF, ROAD_COLORS.laneEdge);
-    band(LANE_HALF - 1.6, surface);
+    // Verge, then the pavement kerb, then the carriageway: three bands, which
+    // is what makes a made-up street read as one rather than as a strip of
+    // tarmac lying on grass.
+    band(LANE_HALF + 1.4, ROAD_COLORS.laneVerge);
+    band(LANE_HALF, ROAD_COLORS.laneKerb);
+    band(LANE_HALF - 1.8, surface);
+
+    // No centre line -- a residential street of this width would not carry
+    // one -- but the kerb edge catches the light, and that is the detail that
+    // says "kerb" rather than "the tarmac stops here".
+    if (!arms.length) return;
+    ctx.strokeStyle = shade(ROAD_COLORS.laneKerb, 1.12);
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (const edge of arms) {
+      const dx = edge.x - centre.x, dy = edge.y - centre.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const px = -dy / len * LANE_HALF, py = dx / len * LANE_HALF;
+      for (const sign of [-1, 1]) {
+        ctx.moveTo(centre.x + px * sign, centre.y + py * sign);
+        ctx.lineTo(edge.x + px * sign, edge.y + py * sign);
+      }
+    }
+    ctx.stroke();
   }
 
   /**
@@ -1072,6 +1096,36 @@ export class Renderer {
       if (w.inBounds(nx, ny) && w.road[w.idx(nx, ny)]) return k;
     }
     return -1;
+  }
+
+  /**
+   * Which way a lot's building faces.
+   *
+   * The street it fronts onto, or -- for a lot with no frontage at all, which
+   * only happens while a district is still being laid out -- towards the
+   * camera, so it is not drawn showing its back to nothing.
+   */
+  facing(x, y) {
+    const k = this.frontage(x, y);
+    return k === -1 ? 1 : k;
+  }
+
+  /**
+   * The same for a merged block, whose frontage is any road its perimeter
+   * touches. Checked in direction order so that a corner block picks the same
+   * street every frame rather than flipping between two.
+   */
+  blockFrontage(block) {
+    const w = this.world;
+    for (let k = 0; k < 4; k++) {
+      for (let d = 0; d < block.span; d++) {
+        const x = block.ox + (k === 0 ? block.span - 1 : k === 2 ? 0 : d);
+        const y = block.oy + (k === 1 ? block.span - 1 : k === 3 ? 0 : d);
+        const nx = x + DIRS[k][0], ny = y + DIRS[k][1];
+        if (w.inBounds(nx, ny) && w.road[w.idx(nx, ny)]) return k;
+      }
+    }
+    return 1;
   }
 
   /**

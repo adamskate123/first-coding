@@ -74,7 +74,7 @@ export function worksHeadroom(zoneKey, level) {
  * and varies in the particulars, which is how real industrial estates look:
  * obviously all the same sort of thing, no two identical.
  */
-export function drawWorks(ctx, ox, oy, zoneKey, level, variant, wealth, era, lit, span = 1) {
+export function drawWorks(ctx, ox, oy, zoneKey, level, variant, wealth, era, lit, span = 1, face = 0) {
   const heavy = zoneKey === 'I_HEAVY';
   const period = ERAS[clamp(era, 0, ERAS.length - 1)];
   const rng = makeRng(hash2(variant * 719 + level * 31, (heavy ? 7919 : 104729) + wealth * 97, 0x5bf03635));
@@ -122,8 +122,11 @@ export function drawWorks(ctx, ox, oy, zoneKey, level, variant, wealth, era, lit
     }
   }
 
-  // Roller doors on a raised loading dock, along the face the camera sees most.
-  const front = faces(shed)[0];
+  // Roller doors on a raised loading dock, on whichever visible wall fronts
+  // the street. A works backs onto its yard and presents its dock to the road,
+  // and putting the doors on a fixed side meant half of them opened onto the
+  // fence.
+  const front = faces(shed)[face === 0 ? 1 : 0];
   const doors = Math.max(1, Math.round(front.len * DOOR_RATE[zoneKey] / 14));
   const dockH = Math.min(5, height * 0.2);
   panel(ctx, front, 0, 1, 0, dockH, shade('#8e8a80', front.tint));
@@ -162,7 +165,7 @@ export function drawWorks(ctx, ox, oy, zoneKey, level, variant, wealth, era, lit
   // An office, on the corner, so the works has a front door. Two storeys of
   // ordinary windows -- the one place a works does look like a building.
   if (level >= 2) {
-    const o = S(0.03, shedV + 0.04);
+    const o = face === 0 ? S(shedU + 0.02, 0.04) : S(0.03, shedV + 0.04);
     const officeH = Math.round(height * 0.62);
     const office = isoSlab(ctx, o.x, o.y, 0.3 * span, 0.3 * span, officeH,
       { wall: mix(wall, '#cfd3d0', 0.35), roof: shade(wall, 0.7) });

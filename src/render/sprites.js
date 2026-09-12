@@ -29,7 +29,7 @@ import { facadeStyle, facadePlan, EL } from './facade.js';
 import { hash2, makeRng, clamp, createLruCache } from '../util.js';
 import {
   makeCanvas, isoOffset, isoBox, groundShadow, drawTreeAt,
-  hipRoof, gableRoof, flatRoofDetail, chimney, awning,
+  hipRoof, gableRoof, flatRoofDetail, chimney, awningOn,
 } from './volumes.js';
 import { civicSprite, CIVIC_HEADROOM } from './civic.js';
 import { isWorks, drawWorks, worksHeight, worksHeadroom } from './works.js';
@@ -57,7 +57,7 @@ const FOOT = 22, SIDE = 30;
 // wealth tiers and periods can legitimately need a few hundred distinct
 // sprites, and a cache that evicts ones still on screen would regenerate them
 // every frame.
-const CACHE_LIMIT = 800;
+const CACHE_LIMIT = 1600;
 const cache = createLruCache(CACHE_LIMIT);
 
 const cacheGet = (key) => cache.get(key);
@@ -65,6 +65,9 @@ const cacheSet = (key, sprite) => cache.set(key, sprite);
 
 /** Number of sprites currently held. Exposed for tests. */
 export function spriteCacheSize() { return cache.size; }
+
+/** How far a building stands back from the street, in tiles. */
+const SETBACK = 0.07;
 
 /** Distinct designs available per zone type and level. */
 export const VARIANTS = 16;
@@ -392,7 +395,69 @@ function dressBox(ctx, box, plan, colors, seed, lit) {
   paintFacade(ctx, box.bottom, { x: box.vw, y: -box.vh }, plan, colors, lit, seed + 91, FACE.right);
 }
 
+/**
+ * Which of a building's two visible walls is the one it fronts onto.
+ *
+ * The camera only ever sees the +x and +y walls. A building fronting +x shows
+ * its front on the right-hand face; one fronting +y shows it on the left-hand
+ * face; and one fronting away from the camera shows its back and a flank,
+ * which is exactly what an aerial view of a real street looks like -- you see
+ * the fronts of the houses on the far side and the backs of the ones on the
+ * near side.
+ */
+function frontFaces(face) {
+  return { left: face === 1, right: face === 0 };
+}
+
+/** Paint a box with the front plan on the street wall and the flank on the other. */
+function dressFacing(ctx, box, plans, face, colors, seed, lit) {
+  const which = frontFaces(face);
+  paintFacade(ctx, box.left, { x: box.uw, y: box.uh },
+    which.left ? plans.front : plans.flank, colors, lit, seed, FACE.left);
+  paintFacade(ctx, box.bottom, { x: box.vw, y: -box.vh },
+    which.right ? plans.front : plans.flank, colors, lit, seed + 91, FACE.right);
+}
+
 // ---------------------------------------------------------------- massing --
+
+/**
+ * Turn a lot's massing to face direction `face`.
+ *
+ * A quarter turn maps a part occupying [u, u+s] x [v, v+s] onto
+ * [1-v-s, 1-v] x [u, u+s], which sends the +x side of the lot to the +y side
+ * -- so applying it `face` times leaves the part that was at the front facing
+ * whichever way the street runs. Symmetric forms come out unchanged, which is
+ * correct: a plain box has no front until its walls are painted.
+ */
+/**
+ * Push a lot's massing away from the street it fronts.
+ *
+ * Small, because the plot is only one tile: enough to read as a front garden
+ * and a back yard rather than a building centred in a square of grass.
+ */
+export function setBack(parts, face) {
+  const turns = ((face % 4) + 4) % 4;
+  const [dx, dy] = [[1, 0], [0, 1], [-1, 0], [0, -1]][turns];
+  return parts.map((part) => ({
+    ...part,
+    u: clamp(part.u - dx * SETBACK, 0, 1 - part.s),
+    v: clamp(part.v - dy * SETBACK, 0, 1 - part.s),
+  }));
+}
+
+export function orientParts(parts, face) {
+  const turns = ((face % 4) + 4) % 4;
+  if (!turns) return parts;
+  return parts.map((part) => {
+    let { u, v } = part;
+    for (let r = 0; r < turns; r++) {
+      const nu = 1 - v - part.s;
+      v = u;
+      u = nu;
+    }
+    return { ...part, u, v };
+  });
+}
 
 /**
  * Break a recipe into the boxes that make up the building.
@@ -476,8 +541,8 @@ function recipeHeight(rec) {
  * Returns { canvas, ox, oy } where (ox, oy) is the offset from the tile origin
  * to the sprite's top-left corner.
  */
-export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1) {
-  const key = `z:${zoneKey}:${level}:${variant}:${wealth}:${era}:${lit ? 1 : 0}:${span}`;
+export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1, face = 0) {
+  const key = `z:${zoneKey}:${level}:${variant}:${wealth}:${era}:${lit ? 1 : 0}:${span}:${face}`;
   const hit = cacheGet(key);
   if (hit) return hit;
 
@@ -494,7 +559,7 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1) 
     const canvas = makeCanvas(w, h);
     const ctx = canvas.getContext('2d');
     const ox = w / 2, oy = totalH + PAD;
-    drawWorks(ctx, ox, oy, zoneKey, level, variant, wealth, era, lit, span);
+    drawWorks(ctx, ox, oy, zoneKey, level, variant, wealth, era, lit, span, face);
     return cacheSet(key, { canvas, ox: -ox, oy: -oy });
   }
 
@@ -517,16 +582,27 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1) 
 
   groundShadow(ctx, ox, oy + ((span - rec.footprint * span) * TILE_H) / 2, rec.footprint * span, recipeHeight(rec));
 
-  // Back to front within the lot, then bottom to top for stacked masses.
-  const parts = massingParts(rec)
+  // Back to front within the lot, then bottom to top for stacked masses. The
+  // lot is turned to its street first, so an ell or a tee puts its wing along
+  // the frontage rather than wherever the generator happened to place it.
+  // ...and set back off the street, so there is a front garden between the
+  // building and the pavement and the yard falls behind it. A lot centred in
+  // its plot has no front or back at all, whatever its walls say.
+  const parts = setBack(orientParts(massingParts(rec), face), face)
     .sort((a, b) => (a.u + a.v) - (b.u + b.v) || a.lift - b.lift);
+  const facing = frontFaces(face);
+  const ridgeAxis = face % 2 === 0 ? 'v' : 'u';
 
   for (const part of parts) {
     const off = isoOffset(part.u * span, part.v * span);
     const box = isoBox(ctx, ox + off.x, oy + off.y - part.lift, part.s * span, part.h, colors);
     const faceWidth = Math.hypot(box.w2, box.h2);
-    const plan = facadePlan(rec.facade, part.h, faceWidth, rec.category, rec.seed + Math.round(part.u * 1000));
-    dressBox(ctx, box, plan, colors, rec.seed + part.u * 1000, lit);
+    const seed = rec.seed + Math.round(part.u * 1000);
+    const plans = {
+      front: facadePlan(rec.facade, part.h, faceWidth, rec.category, seed, true),
+      flank: facadePlan(rec.facade, part.h, faceWidth, rec.category, seed + 401, false),
+    };
+    dressFacing(ctx, box, plans, face, colors, seed, lit);
 
     if (!part.roofed) {
       flatRoofDetail(ctx, box, colors, { ...rec, tanks: 0, antenna: false });
@@ -538,28 +614,23 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1) 
       hipRoof(ctx, box.ox, box.oy, part.s, part.h, rise, colors.roof);
       if (rec.chimney) chimney(ctx, box, colors, rec);
     } else if (rec.roof === 'gable') {
-      gableRoof(ctx, box.ox, box.oy, part.s, part.h, rise, colors.roof, colors.wall);
+      // Ridge parallel to the street: a terrace whose roofs all run the same
+      // way reads as a terrace, and the same houses with their ridges at right
+      // angles to each other read as boxes dropped on a field.
+      gableRoof(ctx, box.ox, box.oy, part.s, part.h, rise, colors.roof, colors.wall, ridgeAxis);
       if (rec.chimney) chimney(ctx, box, colors, rec);
     } else {
       flatRoofDetail(ctx, box, colors, rec);
     }
-    if (rec.awning) awning(ctx, box, colors);
+    // A canopy belongs over the shopfront, which is on the street wall only.
+    if (rec.awning && (facing.left || facing.right)) {
+      awningOn(ctx, box, colors, facing);
+    }
   }
 
   return cacheSet(key, { canvas, ox: -ox, oy: -oy });
 }
 
-
-/**
- * Sprite for a placed service building.
- *
- * The catalogue types are modelled individually in `civic.js` -- a fire
- * station gets appliance doors and a drill tower, a school gets a long gabled
- * wing, a power station gets chimneys. `civicSprite` returns false for
- * anything without a model, and that case still falls back to the generic
- * box-and-windows treatment, so adding a new catalogue entry never leaves a
- * hole in the map while its art is being drawn.
- */
 /**
  * Sprite for a plot under construction.
  *
