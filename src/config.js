@@ -9,7 +9,7 @@
  * Minor versions track feature releases (bridges, wealth tiers, eras, relief);
  * the patch digit is for fixes and tuning.
  */
-export const VERSION = '0.17.0';
+export const VERSION = '0.18.0';
 
 /**
  * Central tuning constants.

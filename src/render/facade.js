@@ -51,6 +51,9 @@ const MIN_FLOOR = 7;             // px; below this a face is a single storey
 const OPENING_W = [2.5, 11];     // px
 const OPENING_H = [2.5, 10];     // px
 
+/** How much blanker a flank or a back wall is than the face onto the street. */
+const FLANK_BLANK = 0.3;
+
 /**
  * The dimensions and habits of one building's facade.
  *
@@ -106,7 +109,7 @@ export function facadeStyle(rng, category, wealth = 1, era = 1) {
  * to right, with `u` normalised 0..1 along the base so the painter can map
  * them onto the parallelogram of the wall.
  */
-export function facadePlan(style, height, faceWidth, category, seed) {
+export function facadePlan(style, height, faceWidth, category, seed, front = true) {
   const elements = [];
   if (height < 4 || faceWidth < 4) return { bands: [], elements, floors: 0, bays: 0 };
 
@@ -140,13 +143,19 @@ export function facadePlan(style, height, faceWidth, category, seed) {
   // --- ground storey -------------------------------------------------------
   // One bay gets the entrance; the rest get whatever the use calls for. A
   // shopfront needs room to be one, so below that it stays an ordinary window.
-  const shopfrontable = category === 'C' && ground >= 7 && bayW >= 6;
-  const doorBay = bays > 1 ? Math.floor(pick(7001) * bays) : 0;
+  // A wall that is not the front does not get the front door, and does not get
+  // a shopfront either. It is also plainer: the flank and the back of a
+  // building carry markedly fewer openings than the face it presents to the
+  // street, and drawing all four sides alike is most of why a row of houses
+  // used to read as a row of boxes regardless of which way the street ran.
+  const shopfrontable = front && category === 'C' && ground >= 7 && bayW >= 6;
+  const doorBay = front ? (bays > 1 ? Math.floor(pick(7001) * bays) : 0) : -1;
+  const plain = front ? 0 : FLANK_BLANK;
   for (let b = 0; b < bays; b++) {
     const kind = b === doorBay && ground >= 6 ? EL.DOOR
       : shopfrontable ? EL.SHOPFRONT
       : category === 'I' ? (pick(b * 31 + 11) < 0.5 ? EL.LOUVRE : EL.BLANK)
-      : (pick(b * 31 + 13) < 0.22 ? EL.BLANK : EL.WINDOW);
+      : (pick(b * 31 + 13) < 0.22 + plain ? EL.BLANK : EL.WINDOW);
     if (kind === EL.BLANK) continue;
     put(b, 0, ground, kind, kind === EL.SHOPFRONT);
   }
@@ -159,8 +168,8 @@ export function facadePlan(style, height, faceWidth, category, seed) {
   for (let f = 0; f < floors; f++) {
     const v0 = ground + f * floorH;
     for (let b = 0; b < bays; b++) {
-      if (pick(f * 131 + b * 17 + 3) < style.blankRate) continue;
-      const balcony = style.balconyRate > 0 && floorH >= 8 && bayW >= 7
+      if (pick(f * 131 + b * 17 + 3) < style.blankRate + plain) continue;
+      const balcony = front && style.balconyRate > 0 && floorH >= 8 && bayW >= 7
         && pick(f * 197 + b * 23 + 5) < style.balconyRate;
       put(b, v0, v0 + floorH, balcony ? EL.BALCONY : EL.WINDOW, false);
     }

@@ -375,21 +375,35 @@ export function hipRoof(ctx, ox, oy, span, lift, rise, color) {
  * ridge rather than a pyramid -- which is the whole reason a school reads as a
  * school and not as a big house.
  */
-export function gableRoofUV(ctx, ox, oy, su, sv, lift, rise, color, wall) {
+export function gableRoofUV(ctx, ox, oy, su, sv, lift, rise, color, wall, along = 'u') {
   const c = corners(ox, oy, su, sv, lift);
   const { top, right, bottom, left } = c;
-  // Ridge: midway across the v extent, running the length of u.
-  const ridgeA = { x: ox - c.vw / 2, y: oy + c.vh / 2 - lift - rise };
-  const ridgeB = { x: ridgeA.x + c.uw, y: ridgeA.y + c.uh };
+  // The ridge runs the length of one axis, midway across the other. Which one
+  // matters more than it sounds: a row of houses with their ridges all
+  // parallel to the street reads as a street, and the same houses with their
+  // ridges at right angles to each other read as boxes dropped on a field.
+  const ridgeA = along === 'u'
+    ? { x: ox - c.vw / 2, y: oy + c.vh / 2 - lift - rise }
+    : { x: ox + c.uw / 2, y: oy + c.uh / 2 - lift - rise };
+  const ridgeB = along === 'u'
+    ? { x: ridgeA.x + c.uw, y: ridgeA.y + c.uh }
+    : { x: ridgeA.x - c.vw, y: ridgeA.y + c.vh };
 
   // Gable end walls first; the slopes overlap their upper edges.
+  const ends = along === 'u'
+    ? [[top, left], [right, bottom]]
+    : [[top, right], [left, bottom]];
   ctx.fillStyle = shade(wall, 0.86);
   ctx.beginPath();
-  ctx.moveTo(top.x, top.y); ctx.lineTo(left.x, left.y); ctx.lineTo(ridgeA.x, ridgeA.y);
+  ctx.moveTo(ends[0][0].x, ends[0][0].y);
+  ctx.lineTo(ends[0][1].x, ends[0][1].y);
+  ctx.lineTo(ridgeA.x, ridgeA.y);
   ctx.closePath(); ctx.fill();
   ctx.fillStyle = shade(wall, 0.64);
   ctx.beginPath();
-  ctx.moveTo(right.x, right.y); ctx.lineTo(bottom.x, bottom.y); ctx.lineTo(ridgeB.x, ridgeB.y);
+  ctx.moveTo(ends[1][0].x, ends[1][0].y);
+  ctx.lineTo(ends[1][1].x, ends[1][1].y);
+  ctx.lineTo(ridgeB.x, ridgeB.y);
   ctx.closePath(); ctx.fill();
 
   const plane = (a, b, tint) => {
@@ -399,8 +413,13 @@ export function gableRoofUV(ctx, ox, oy, su, sv, lift, rise, color, wall) {
     ctx.lineTo(ridgeB.x, ridgeB.y); ctx.lineTo(ridgeA.x, ridgeA.y);
     ctx.closePath(); ctx.fill();
   };
-  plane(top, right, 0.74);     // far slope
-  plane(left, bottom, 1.05);   // near slope, catching the light
+  if (along === 'u') {
+    plane(top, right, 0.74);     // far slope
+    plane(left, bottom, 1.05);   // near slope, catching the light
+  } else {
+    plane(top, left, 0.8);
+    plane(right, bottom, 1.0);
+  }
 
   // Ridge and eaves. Without them the two slopes merge into one lozenge.
   ctx.strokeStyle = shade(color, 1.34);
@@ -417,8 +436,8 @@ export function gableRoofUV(ctx, ox, oy, su, sv, lift, rise, color, wall) {
 }
 
 /** A gabled roof on a square footprint. */
-export function gableRoof(ctx, ox, oy, span, lift, rise, color, wall) {
-  return gableRoofUV(ctx, ox, oy, span, span, lift, rise, color, wall);
+export function gableRoof(ctx, ox, oy, span, lift, rise, color, wall, along = 'u') {
+  return gableRoofUV(ctx, ox, oy, span, span, lift, rise, color, wall, along);
 }
 
 /**
@@ -508,24 +527,39 @@ export function chimney(ctx, box, colors, rec) {
   });
 }
 
-/** A shop canopy along the two street-facing edges. */
-export function awning(ctx, box, colors) {
+/**
+ * A shop canopy, over whichever visible walls front the street.
+ *
+ * It used to be drawn along both, which put an awning over the back of every
+ * corner shop in the city. `facing` says which of the two the building
+ * actually fronts onto.
+ */
+export function awningOn(ctx, box, colors, facing = { left: true, right: true }) {
   const { bottom, left, right } = box;
   const drop = 5;
-  ctx.fillStyle = shade(colors.roof, 1.18);
-  ctx.beginPath();
-  ctx.moveTo(left.x, left.y - drop - 3);
-  ctx.lineTo(bottom.x, bottom.y - drop - 3);
-  ctx.lineTo(bottom.x, bottom.y - drop);
-  ctx.lineTo(left.x, left.y - drop);
-  ctx.closePath(); ctx.fill();
-  ctx.fillStyle = shade(colors.roof, 0.95);
-  ctx.beginPath();
-  ctx.moveTo(bottom.x, bottom.y - drop - 3);
-  ctx.lineTo(right.x, right.y - drop - 3);
-  ctx.lineTo(right.x, right.y - drop);
-  ctx.lineTo(bottom.x, bottom.y - drop);
-  ctx.closePath(); ctx.fill();
+  if (facing.left) {
+    ctx.fillStyle = shade(colors.roof, 1.18);
+    ctx.beginPath();
+    ctx.moveTo(left.x, left.y - drop - 3);
+    ctx.lineTo(bottom.x, bottom.y - drop - 3);
+    ctx.lineTo(bottom.x, bottom.y - drop);
+    ctx.lineTo(left.x, left.y - drop);
+    ctx.closePath(); ctx.fill();
+  }
+  if (facing.right) {
+    ctx.fillStyle = shade(colors.roof, 0.95);
+    ctx.beginPath();
+    ctx.moveTo(bottom.x, bottom.y - drop - 3);
+    ctx.lineTo(right.x, right.y - drop - 3);
+    ctx.lineTo(right.x, right.y - drop);
+    ctx.lineTo(bottom.x, bottom.y - drop);
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+/** A shop canopy along both street-facing edges. */
+export function awning(ctx, box, colors) {
+  awningOn(ctx, box, colors, { left: true, right: true });
 }
 
 // ----------------------------------------------------------------- nature --

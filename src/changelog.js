@@ -15,6 +15,17 @@ import { VERSION } from './config.js';
 
 export const CHANGELOG = [
   {
+    version: '0.18.0',
+    headline: 'Houses that face their street',
+    changes: [
+      'Buildings now turn to the road they front onto. The front door, the shopfront and most of the windows go on the street wall; the flank and the back are plainer, the way they are in life. Seen from above you get the fronts of the houses across the street and the backs of the ones nearer you, which is what a real aerial view looks like.',
+      'Roof ridges run parallel to the street, so a row of houses reads as a row rather than as boxes at odd angles to each other.',
+      'Buildings stand back from the kerb, leaving a front garden and putting the yard behind.',
+      'An L-shaped or T-shaped building turns its wing along the frontage instead of wherever it happened to land.',
+      'The lanes developers lay are made-up streets now — tarmac, kerbs and a verge — rather than the dirt tracks they came out as.',
+    ],
+  },
+  {
     version: '0.17.0',
     headline: 'Districts get laid out and built, instead of appearing',
     changes: [

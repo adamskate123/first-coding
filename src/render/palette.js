@@ -29,9 +29,13 @@ export const ROAD_COLORS = {
   // before its markings are legible.
   avenue: '#5b5852',
   markings: '#c9c2a8',
-  // A developer's lane: laid cheap, worn at the edges, no markings at all.
-  lane: '#8a8375',
-  laneEdge: '#756f63',
+  // A developer's lane: a made-up residential street, narrower than the ones
+  // the city lays and without a centre line, but tarmac and kerbs all the
+  // same. The first cut was a sandy track, which read as a farm road running
+  // through a housing estate.
+  lane: '#6f6c66',
+  laneKerb: '#a6a196',
+  laneVerge: '#7d8a5e',
   // A divided carriageway's median: kerbed, and planted where there is room.
   median: '#9d9787',
   medianEdge: '#7d7868',
