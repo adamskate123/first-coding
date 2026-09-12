@@ -15,6 +15,17 @@ import { VERSION } from './config.js';
 
 export const CHANGELOG = [
   {
+    version: '0.19.0',
+    headline: 'Streets all the way through a district',
+    changes: [
+      'Houses were being built straight over the lanes the developers had just laid — so the streets vanished and a district came out solid. Fixed, and it is most of why interiors looked the way they did.',
+      'Every plot now gets a street of its own next to it. Lanes used to be laid only where land was out of reach of a road altogether, but a building faces the street next door, and between a third and a half of every block had nothing adjacent to face. Lanes now run three apart — street, two rows of houses, street — the way a subdivision is actually laid out.',
+      'Because streets take land, a plot holds more than it used to, so a district still houses about what it did before.',
+      'Gardens: hedges and fences on the boundary, trees at the bottom of the plot, the odd shed. Houses sit at slightly different distances from the kerb and from each other, so a street is not a row of identical boxes on a grid.',
+      'The district outline is no longer drawn over the road surface.',
+    ],
+  },
+  {
     version: '0.18.0',
     headline: 'Houses that face their street',
     changes: [

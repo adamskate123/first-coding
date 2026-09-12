@@ -24,7 +24,7 @@
  */
 
 import { TILE_W, TILE_H, BUILDINGS, ERAS } from '../config.js';
-import { buildingPalette, applyEra, roofColor, TREE_COLORS, FACE, WINDOW_LIT, shade, mix } from './palette.js';
+import { buildingPalette, applyEra, roofColor, TREE_COLORS, LOT, FACE, WINDOW_LIT, shade, mix } from './palette.js';
 import { facadeStyle, facadePlan, EL } from './facade.js';
 import { hash2, makeRng, clamp, createLruCache } from '../util.js';
 import {
@@ -66,8 +66,9 @@ const cacheSet = (key, sprite) => cache.set(key, sprite);
 /** Number of sprites currently held. Exposed for tests. */
 export function spriteCacheSize() { return cache.size; }
 
-/** How far a building stands back from the street, in tiles. */
-const SETBACK = 0.07;
+/** How far a building stands back from the street, and how much lots differ. */
+const SETBACK = 0.1;
+const SHUFFLE = 0.07;
 
 /** Distinct designs available per zone type and level. */
 export const VARIANTS = 16;
@@ -435,13 +436,20 @@ function dressFacing(ctx, box, plans, face, colors, seed, lit) {
  * Small, because the plot is only one tile: enough to read as a front garden
  * and a back yard rather than a building centred in a square of grass.
  */
-export function setBack(parts, face) {
+export function setBack(parts, face, seed = 0) {
   const turns = ((face % 4) + 4) % 4;
   const [dx, dy] = [[1, 0], [0, 1], [-1, 0], [0, -1]][turns];
+  // How far back, and how far along the frontage, varies by lot. A street
+  // where every house sits at exactly the same distance from the kerb and
+  // exactly the same distance from its neighbours reads as a grid, which is
+  // the thing all of this is trying to get away from -- and real streets are
+  // not surveyed that way either.
+  const back = SETBACK * (0.55 + (hash2(seed, 17, 0x2f9a) / 4294967296) * 1.3);
+  const side = (hash2(seed, 29, 0x51c7) / 4294967296 - 0.5) * SHUFFLE;
   return parts.map((part) => ({
     ...part,
-    u: clamp(part.u - dx * SETBACK, 0, 1 - part.s),
-    v: clamp(part.v - dy * SETBACK, 0, 1 - part.s),
+    u: clamp(part.u - dx * back - dy * side, 0, 1 - part.s),
+    v: clamp(part.v - dy * back + dx * side, 0, 1 - part.s),
   }));
 }
 
@@ -588,7 +596,7 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1, 
   // ...and set back off the street, so there is a front garden between the
   // building and the pavement and the yard falls behind it. A lot centred in
   // its plot has no front or back at all, whatever its walls say.
-  const parts = setBack(orientParts(massingParts(rec), face), face)
+  const parts = setBack(orientParts(massingParts(rec), face), face, rec.seed)
     .sort((a, b) => (a.u + a.v) - (b.u + b.v) || a.lift - b.lift);
   const facing = frontFaces(face);
   const ridgeAxis = face % 2 === 0 ? 'v' : 'u';
@@ -628,7 +636,63 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1, 
     }
   }
 
+  if (rec.category === 'R') garden(ctx, ox, oy, span, face, rec, colors);
+
   return cacheSet(key, { canvas, ox: -ox, oy: -oy });
+}
+
+/**
+ * What fills the part of a plot the house does not.
+ *
+ * A house drawn in the middle of a bare square of lawn is the thing that makes
+ * a suburb read as a spreadsheet. The ground under it already carries a drive
+ * out to the street; what was missing is everything behind and beside --
+ * a tree or two, a hedge on the boundary, a shed at the bottom of the garden.
+ * Drawn into the sprite rather than onto the ground so it sorts with the
+ * building instead of being painted over by it.
+ */
+function garden(ctx, ox, oy, span, face, rec, colors) {
+  const rng = makeRng(hash2(rec.seed * 13 + face, span * 71, 0x27d4eb2f));
+  const [dx, dy] = [[1, 0], [0, 1], [-1, 0], [0, -1]][((face % 4) + 4) % 4];
+  const P = (u, v) => ({
+    x: ox + (u - v) * (TILE_W / 2) * span,
+    y: oy + (u + v) * (TILE_H / 2) * span,
+  });
+  // Back of the plot is the corner furthest from the street.
+  const bu = dx > 0 ? 0.16 : dx < 0 ? 0.84 : 0.5;
+  const bv = dy > 0 ? 0.16 : dy < 0 ? 0.84 : 0.5;
+
+  // A hedge or a fence along the boundary the house does not front onto.
+  const line = rng();
+  if (line < 0.7) {
+    const a = P(0.97, 0.06), b = P(0.97, 0.97), c = P(0.06, 0.97);
+    ctx.strokeStyle = line < 0.45 ? LOT.hedge : '#8c7a5e';
+    ctx.lineWidth = line < 0.45 ? 2.4 : 1.4;
+    ctx.beginPath();
+    for (const [p, q] of [[a, b], [b, c]]) {
+      ctx.moveTo(p.x, p.y - 3); ctx.lineTo(q.x, q.y - 3);
+    }
+    ctx.stroke();
+  }
+
+  // A shed, at the bottom of the garden.
+  if (rng() < 0.4) {
+    const p = P(bu + (rng() - 0.5) * 0.2, bv + (rng() - 0.5) * 0.2);
+    isoBox(ctx, p.x, p.y, 0.16 * span, 5, { wall: '#9a8a6e', roof: '#6d5f49' });
+  }
+
+  // Trees, which is most of it. Planted back to front so a nearer one covers
+  // a further one rather than the other way round.
+  const trees = 1 + Math.floor(rng() * 3);
+  const spots = [];
+  for (let k = 0; k < trees; k++) {
+    spots.push({ u: bu + (rng() - 0.5) * 0.55, v: bv + (rng() - 0.5) * 0.55, s: 0.55 + rng() * 0.5 });
+  }
+  spots.sort((a, b) => (a.u + a.v) - (b.u + b.v));
+  for (const spot of spots) {
+    const p = P(clamp(spot.u, 0.08, 0.92), clamp(spot.v, 0.08, 0.92));
+    drawTreeAt(ctx, p.x, p.y, rec.seed + Math.round(spot.u * 10), spot.s * span);
+  }
 }
 
 /**

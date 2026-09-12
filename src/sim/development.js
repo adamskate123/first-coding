@@ -24,8 +24,8 @@
  * and construction runs through its stages first.
  */
 
-import { Z, ZONE_INFO, ROAD, T, ROAD_REACH, LANE_INTERVAL, LANES_PER_PASS,
-         LANE_DEMAND, BUILD_STAGES, STAGE_CHANCE, onLaneGrid } from '../config.js';
+import { Z, ZONE_INFO, ROAD, T, LANE_INTERVAL, LANES_PER_PASS,
+         BUILD_STAGES, STAGE_CHANCE, onLaneGrid } from '../config.js';
 
 /**
  * Advance every site under construction, and lay a little more lane.
@@ -116,6 +116,9 @@ function layLanes(world, rng) {
     let at = target;
     while (from[at] !== -1 && dist[from[at]] > 0) at = from[at];
     if (world.road[at] || !developable(world, at)) continue;
+    // Re-checked here rather than trusted from the sweep: a lane laid earlier
+    // in this same pass may already have given these plots their frontage.
+    if (!serves(world, at)) continue;
     world.road[at] = ROAD.LANE;
     world.stage[at] = 0;
     world.level[at] = 0;
@@ -125,55 +128,53 @@ function layLanes(world, rng) {
     world.touch();
     world.dirty = true;
     laid++;
-    // Everything within reach of the new lane is served now, so record that
-    // before choosing the next one -- otherwise one pass lays a second stretch
-    // towards plots the first already reached.
-    markReached(world, at, dist);
+    dist[at] = 0;
   }
 }
 
-/**
- * Would a lane here give frontage to anything worth building on?
- *
- * A lane is only laid where there is a zoned plot in reach of it that has no
- * frontage yet and a market that would pay for one. Without this, lanes keep
- * being laid past the last plot and out into open country.
- */
-export function serves(world, i) {
+/** Does this plot have a road immediately next to it to face? */
+export function hasFrontage(world, i) {
   const s = world.size;
-  const ax = i % s, ay = (i / s) | 0;
-  for (let dy = -ROAD_REACH; dy <= ROAD_REACH; dy++) {
-    for (let dx = -ROAD_REACH; dx <= ROAD_REACH; dx++) {
-      if (Math.abs(dx) + Math.abs(dy) > ROAD_REACH) continue;
-      const x = ax + dx, y = ay + dy;
-      if (x < 0 || y < 0 || x >= s || y >= s) continue;
-      const j = y * s + x;
-      if (world.zone[j] === Z.NONE || world.roadAccess[j] || world.road[j]) continue;
-      const info = ZONE_INFO[world.zone[j]];
-      if (info && world.demand[info.cat] >= LANE_DEMAND) return true;
-    }
+  const x = i % s, y = (i / s) | 0;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nx = x + dx, ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= s || ny >= s) continue;
+    if (world.road[ny * s + nx]) return true;
   }
   return false;
 }
 
 /**
- * Flag the plots a newly laid lane brings into reach.
+ * Would a lane here give frontage to anything worth building on?
  *
- * A cheap local flood rather than a second full pass over the map: only tiles
- * within ROAD_REACH of the new lane can have changed.
+ * Frontage, not access. A plot within ROAD_REACH of a road can be built on,
+ * but a building faces the street *next door* to it -- so a plot three tiles
+ * from the nearest road has nothing to face, and a district full of them comes
+ * out as houses backing onto each other at no angle in particular. Only the
+ * four orthogonal neighbours count, which is why the lattice rows sit three
+ * apart: lane, plot, plot, lane.
+ *
+ * Deliberately not conditioned on demand. It was, and that deadlocked: only
+ * the plots already on the rim could develop, a handful of houses satisfied
+ * the market, demand went negative, lane-laying stopped, and the plots that
+ * would have carried the next wave of building could never get frontage to
+ * be built on. Measured: 933 of 1,152 plots stranded with no street and a
+ * district frozen at 96 houses. Developers lay out land when they buy it,
+ * not plot by plot as buyers turn up, and the upkeep on a lane nobody builds
+ * along is the honest cost of zoning ground you did not need.
  */
-function markReached(world, at, dist) {
+export function serves(world, i) {
   const s = world.size;
-  const ax = at % s, ay = (at / s) | 0;
-  for (let dy = -ROAD_REACH; dy <= ROAD_REACH; dy++) {
-    for (let dx = -ROAD_REACH; dx <= ROAD_REACH; dx++) {
-      if (Math.abs(dx) + Math.abs(dy) > ROAD_REACH) continue;
-      const x = ax + dx, y = ay + dy;
-      if (x < 0 || y < 0 || x >= s || y >= s) continue;
-      world.roadAccess[y * s + x] = 1;
-    }
+  const ax = i % s, ay = (i / s) | 0;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const x = ax + dx, y = ay + dy;
+    if (x < 0 || y < 0 || x >= s || y >= s) continue;
+    const j = y * s + x;
+    if (world.zone[j] === Z.NONE || world.road[j]) continue;
+    if (hasFrontage(world, j)) continue;
+    if (ZONE_INFO[world.zone[j]]) return true;
   }
-  dist[at] = 0;
+  return false;
 }
 
 /**

@@ -71,6 +71,23 @@ export function updateGrowth(world, rng) {
     const info = ZONE_INFO[z];
     if (!info) continue;
 
+    // A plot the developers have taken for a lane is street now, whatever the
+    // zoning map still says about it. Nothing checked this, so every lane laid
+    // through zoned land was built over within a few ticks -- measured at 402
+    // of 426 -- which is why a district came out solid with its streets
+    // nowhere to be seen.
+    if (world.road[i]) {
+      if (world.level[i] || world.stage[i]) {
+        world.level[i] = 0;
+        world.stage[i] = 0;
+        world.pop[i] = 0;
+        world.jobs[i] = 0;
+        world.touch();
+      }
+      world.growthTimer[i] = 0;
+      continue;
+    }
+
     const maxLevel = info.cap.length - 1;
     const level = world.level[i];
     const demand = world.demand[info.cat];

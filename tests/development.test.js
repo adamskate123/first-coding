@@ -15,7 +15,7 @@ import { World } from '../src/world.js';
 import { Z, T, ROAD, ROAD_REACH, BUILD_STAGES, onLaneGrid,
          LANE_ROW_PITCH } from '../src/config.js';
 import { updateRoadAccess } from '../src/sim/networks.js';
-import { updateDevelopment, isSite, reservedForLane } from '../src/sim/development.js';
+import { updateDevelopment, isSite, reservedForLane, hasFrontage } from '../src/sim/development.js';
 import { updateGrowth } from '../src/sim/growth.js';
 import { serialize, deserialize } from '../src/save.js';
 import { makeRng } from '../src/util.js';
@@ -97,21 +97,33 @@ test('laying out a district takes minutes, not hours or seconds', () => {
   assert.ok(done < 1500, `laid out in ${done} ticks, which is too slow to bother`);
 });
 
-test('a lane network reaches every plot without eating the block', () => {
-  // Without a lattice the lanes simply spread: each unserved plot pulls one
-  // towards itself, the plot behind it becomes the unserved one, and a block
-  // ends up almost entirely road. Measured at 94% before the lattice existed.
+test('every plot ends up with a street beside it', () => {
+  // Frontage, not access. A plot within reach of a road can be built on, but a
+  // building faces the street *next door*, so a plot three tiles away has
+  // nothing to face. Measured on blocks ringed by the player's own roads,
+  // between 36% and 49% of plots had nothing adjacent -- which is why the
+  // interior of a district came out as houses backing onto each other.
   const w = subdivision();
-  develop(w, 2000);
+  develop(w, 4000);
 
-  const zoned = countZoned(w);
-  let unserved = 0;
+  let strandedPlots = 0;
   for (let i = 0; i < w.zone.length; i++) {
-    if (w.zone[i] && !w.roadAccess[i] && !w.road[i]) unserved++;
+    if (!w.zone[i] || w.road[i]) continue;
+    if (!hasFrontage(w, i)) strandedPlots++;
   }
-  assert.equal(unserved, 0, `${unserved} plots still have no frontage`);
-  assert.ok(countLanes(w) / zoned < 0.3,
-    `lanes took ${(100 * countLanes(w) / zoned).toFixed(0)}% of the block`);
+  assert.equal(strandedPlots, 0, `${strandedPlots} plots have no street beside them`);
+});
+
+test('the lattice costs what a subdivision costs, and no more', () => {
+  // Giving every plot a street of its own is not free: rows have to sit three
+  // apart -- lane, plot, plot, lane -- so about a third of a block becomes
+  // road. That is what a real subdivision spends on streets. Much beyond it
+  // and something has gone wrong with the lattice.
+  const w = subdivision();
+  develop(w, 4000);
+  const share = countLanes(w) / countZoned(w);
+  assert.ok(share > 0.2, `only ${(100 * share).toFixed(0)}% lane: too few to give frontage`);
+  assert.ok(share < 0.45, `lanes took ${(100 * share).toFixed(0)}% of the block`);
 });
 
 test('every lane sits on the lattice', () => {

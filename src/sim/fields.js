@@ -233,7 +233,7 @@ const PRESTIGE_CAP = 90;           // most a neighbourhood can earn this way
  * per-lot scores suggest. Reading it off the table gave a downtown eleven
  * points of a hundred and no visible feedback at all.
  */
-const PRESTIGE_REF = 15;
+const PRESTIGE_REF = 13;
 /** Above one, so ordinary streets earn little and only a real core earns a lot. */
 const PRESTIGE_CURVE = 1.7;
 /** How fast a neighbourhood's standing follows what is built on it. */

@@ -9,7 +9,7 @@
  * Minor versions track feature releases (bridges, wealth tiers, eras, relief);
  * the patch digit is for fixes and tuning.
  */
-export const VERSION = '0.18.0';
+export const VERSION = '0.19.0';
 
 /**
  * Central tuning constants.
@@ -109,27 +109,27 @@ export const Z = {
 export const ZONE_INFO = {
   [Z.R_LOW]: {
     key: 'R_LOW', name: 'Residential', sub: 'Low Density', cat: 'R', tint: '#4f9d4f',
-    cost: 12, cap: [0, 6, 14, 26], lvNeed: [0, 0, 55, 100], power: [0, 4, 9, 16],
+    cost: 12, cap: [0, 9, 21, 39], lvNeed: [0, 0, 55, 100], power: [0, 6, 14, 24],
   },
   [Z.R_HIGH]: {
     key: 'R_HIGH', name: 'Residential', sub: 'High Density', cat: 'R', tint: '#2f7d3f',
-    cost: 34, cap: [0, 24, 60, 130, 240], lvNeed: [0, 70, 105, 140, 180], power: [0, 16, 38, 80, 145],
+    cost: 34, cap: [0, 36, 90, 195, 360], lvNeed: [0, 70, 105, 140, 180], power: [0, 24, 57, 120, 218],
   },
   [Z.C_LOW]: {
     key: 'C_LOW', name: 'Commercial', sub: 'Low Density', cat: 'C', tint: '#4f7fc4',
-    cost: 14, cap: [0, 5, 12, 22], lvNeed: [0, 0, 60, 105], power: [0, 6, 13, 24],
+    cost: 14, cap: [0, 8, 18, 33], lvNeed: [0, 0, 60, 105], power: [0, 9, 20, 36],
   },
   [Z.C_HIGH]: {
     key: 'C_HIGH', name: 'Commercial', sub: 'High Density', cat: 'C', tint: '#2f5aa8',
-    cost: 38, cap: [0, 20, 52, 105, 190], lvNeed: [0, 80, 115, 150, 190], power: [0, 22, 52, 105, 185],
+    cost: 38, cap: [0, 30, 78, 158, 285], lvNeed: [0, 80, 115, 150, 190], power: [0, 33, 78, 158, 278],
   },
   [Z.I_LIGHT]: {
     key: 'I_LIGHT', name: 'Industrial', sub: 'Light', cat: 'I', tint: '#c9a13b',
-    cost: 16, cap: [0, 9, 20, 34], lvNeed: [0, 0, 30, 55], power: [0, 12, 26, 46],
+    cost: 16, cap: [0, 14, 30, 51], lvNeed: [0, 0, 30, 55], power: [0, 18, 39, 69],
   },
   [Z.I_HEAVY]: {
     key: 'I_HEAVY', name: 'Industrial', sub: 'Heavy', cat: 'I', tint: '#a06a1f',
-    cost: 30, cap: [0, 28, 65, 120], lvNeed: [0, 0, 25, 45], power: [0, 40, 90, 165],
+    cost: 30, cap: [0, 42, 98, 180], lvNeed: [0, 0, 25, 45], power: [0, 60, 135, 248],
   },
 };
 
@@ -174,7 +174,7 @@ export const ROAD_INFO = {
  * two glances at the same corner of the map.
  */
 export const LANE_INTERVAL = 6;      // ticks between one pass of the developers
-export const LANES_PER_PASS = 2;     // and how much lane they lay in one
+export const LANES_PER_PASS = 3;     // and how much lane they lay in one
 export const LANE_DEMAND = -0.15;    // nobody subdivides into a dead market
 
 /**
@@ -185,17 +185,25 @@ export const LANE_DEMAND = -0.15;    // nobody subdivides into a dead market
  * block ends up 94% road. Measured exactly that on a 36x32 block -- 1,080 of
  * 1,152 plots became lane.
  *
- * Rows at a pitch of twice ROAD_REACH plus one means every plot is in reach of
- * one and none is in reach of two, which is the tightest a subdivision can be
- * laid out without wasting land. Cross-streets are rarer, because a suburb
- * needs a way through but not one every block. Both are keyed to absolute map
- * coordinates, so the grid is the same wherever a district happens to start
- * and neighbouring districts line up.
+ * Rows sit three apart -- lane, plot, plot, lane -- which is what puts a
+ * street at the end of every garden. The first cut spaced them at twice
+ * ROAD_REACH plus one, on the reasoning that a plot only has to be *within
+ * reach* of a road to be built on. That is true of the simulation and false of
+ * the picture: a building faces the street next door to it, and a plot three
+ * tiles from the nearest road has no street to face. Measured on blocks ringed
+ * by the player's own roads, between 36% and 49% of plots had nothing
+ * adjacent, so the whole interior of a district came out as houses backing
+ * onto each other at no angle in particular.
+ *
+ * Cross-streets stay rare, because a suburb needs a way through but not one
+ * every block. Both are keyed to absolute map coordinates, so the grid is the
+ * same wherever a district happens to start and neighbouring districts line
+ * up.
  */
-export const LANE_ROW_PITCH = 7;
-export const LANE_COL_PITCH = 14;
-export const LANE_ROW_OFFSET = 3;
-export const LANE_COL_OFFSET = 6;
+export const LANE_ROW_PITCH = 3;
+export const LANE_COL_PITCH = 12;
+export const LANE_ROW_OFFSET = 1;
+export const LANE_COL_OFFSET = 5;
 
 /** Is this tile on the lattice a developer would lay a lane along? */
 export function onLaneGrid(x, y) {
