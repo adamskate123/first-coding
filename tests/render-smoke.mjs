@@ -203,6 +203,55 @@ async function main() {
   else if (cars.hidden) fail('the traffic could not be switched off');
   else ok(`${cars.count} cars driving, ${cars.onDeck} on bridges, over ${cars.drawn} tiles`);
 
+  // Scrolling must not leave the previous frame behind.
+  //
+  // The city is cached into offscreen layers and only rebuilt when the camera
+  // moves, so a fault in that rebuild shows up as smearing while panning and
+  // is invisible the rest of the time. The invariant that catches it is exact:
+  // a frame composed from cached layers has to be pixel-identical to the same
+  // frame drawn from scratch. It was not -- the layers were being cleared
+  // under the previous camera's transform, so most of each panned frame was
+  // whatever had been there before.
+  const stale = await page.evaluate(() => {
+    const g = window.game;
+    const grab = () => {
+      const c = g.canvas;
+      const t = document.createElement('canvas');
+      t.width = c.width; t.height = c.height;
+      t.getContext('2d').drawImage(c, 0, 0);
+      return t.getContext('2d').getImageData(0, 0, c.width, c.height);
+    };
+    g.renderer.showVehicles = false;
+    const worst = [];
+    for (const zoom of [0.5, 1.2, 2.2]) {
+      g.camera.centerOn(30, 25);
+      g.camera.zoom = zoom;
+      g.renderer.markDirty(); g.renderer.render();
+      for (let k = 0; k < 25; k++) {
+        g.camera.x += 11; g.camera.y += 5;
+        g.renderer.markDirty(); g.renderer.render();
+      }
+      const cached = grab();
+      g.renderer.layerKey = null;
+      g.renderer.layers = null;
+      g.renderer.markDirty(); g.renderer.render();
+      const fresh = grab();
+      let diff = 0;
+      for (let p = 0; p < cached.data.length; p += 4) {
+        if (Math.abs(cached.data[p] - fresh.data[p])
+          + Math.abs(cached.data[p + 1] - fresh.data[p + 1])
+          + Math.abs(cached.data[p + 2] - fresh.data[p + 2]) > 6) diff++;
+      }
+      worst.push({ zoom, pct: +(100 * diff / (cached.width * cached.height)).toFixed(2) });
+    }
+    g.renderer.showVehicles = true;
+    return worst;
+  });
+  const smeared = stale.filter((s) => s.pct > 0.05);
+  if (smeared.length) {
+    fail(`panning leaves stale pixels: ${smeared.map((s) => `${s.pct}% at zoom ${s.zoom}`).join(', ')}`);
+  } else ok('a panned frame matches one drawn from scratch at every zoom');
+
   // Drive every tool across the map, including over water, so previews draw.
   const tools = await page.evaluate(() => Array.from(
     document.querySelectorAll('#tool-groups .tool-btn'), (b) => b.dataset.tool));
