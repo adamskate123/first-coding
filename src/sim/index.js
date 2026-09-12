@@ -7,7 +7,7 @@
  * flat instead of spiking every time a slow system comes due.
  */
 
-import { TICKS_PER_MONTH } from '../config.js';
+import { TICKS_PER_MONTH, BUILDINGS, unlockedIn } from '../config.js';
 import { updateRoadAccess, updatePower, updateBridgeDecks } from './networks.js';
 import { updateCoverage, updatePollution, updateCrime, updateLandValue, primePrestige } from './fields.js';
 import { updateTraffic } from './traffic.js';
@@ -78,7 +78,11 @@ export class Simulation {
     monthlyBudget(w);
 
     w.month++;
-    if (w.month >= 12) { w.month = 0; w.year++; }
+    if (w.month >= 12) {
+      w.month = 0;
+      w.year++;
+      this.announceUnlocks();
+    }
 
     if (w.funds < 0) {
       this.notify('Treasury is overdrawn. Raise taxes or cut services.', 'bad');
@@ -94,6 +98,20 @@ export class Simulation {
     }
     if (w.stats.congestion > 1.0) {
       this.notify('Traffic is at a standstill on the main routes.', 'warn');
+    }
+  }
+
+  /**
+   * Say what the new year has made possible.
+   *
+   * A catalogue that grows is only worth having if the player is told it grew;
+   * otherwise the gas plant that became available in 1938 is discovered in
+   * 1974, by accident, while looking for something else.
+   */
+  announceUnlocks() {
+    const w = this.world;
+    for (const type of unlockedIn(w.year)) {
+      this.notify(`${BUILDINGS[type].name} can now be built.`, 'good');
     }
   }
 

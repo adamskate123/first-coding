@@ -266,6 +266,68 @@ export function cylinderBands(ctx, cyl, bands) {
   }
 }
 
+/** The two faces of a slab the camera can see, with the axis each runs along. */
+export function faces(box) {
+  return [
+    { anchor: box.left, dir: { x: box.uw, y: box.uh }, tint: FACE.left, len: Math.hypot(box.uw, box.uh) },
+    { anchor: box.bottom, dir: { x: box.vw, y: -box.vh }, tint: FACE.right, len: Math.hypot(box.vw, box.vh) },
+  ];
+}
+
+/**
+ * A rectangle lying in the plane of one wall.
+ *
+ * `f0`/`f1` run 0..1 along the face and `v0`/`v1` are heights in pixels above
+ * its foot, so a door, a sign or a strip of glazing can be placed without the
+ * caller doing any projection of its own.
+ */
+export function panel(ctx, face, f0, f1, v0, v1, fill) {
+  const { anchor, dir } = face;
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(anchor.x + dir.x * f0, anchor.y + dir.y * f0 - v0);
+  ctx.lineTo(anchor.x + dir.x * f1, anchor.y + dir.y * f1 - v0);
+  ctx.lineTo(anchor.x + dir.x * f1, anchor.y + dir.y * f1 - v1);
+  ctx.lineTo(anchor.x + dir.x * f0, anchor.y + dir.y * f0 - v1);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * A north-light roof: a run of asymmetric bays, each a sloped plane with a
+ * glazed face standing at its high edge.
+ *
+ * The single most recognisable industrial roof there is, and the reason a shed
+ * reads as a works rather than as a warehouse-shaped house. Bays run across
+ * the v axis so the sawtooth profile faces the camera.
+ */
+export function sawtoothRoof(ctx, ox, oy, su, sv, lift, rise, bays, roof, glass) {
+  const P = (u, v, h) => ({
+    x: ox + (u - v) * (TILE_W / 2),
+    y: oy + (u + v) * (TILE_H / 2) - h,
+  });
+  const step = sv / bays;
+  for (let k = 0; k < bays; k++) {
+    const a = k * step, b = a + step;
+    // The glazed face, standing at the back edge of this bay...
+    ctx.fillStyle = glass;
+    poly(ctx, [P(0, a, lift + rise), P(su, a, lift + rise), P(su, a, lift), P(0, a, lift)]);
+    ctx.fill();
+    ctx.strokeStyle = shade(roof, 0.6);
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    // ...and the slope falling away from it towards the viewer.
+    ctx.fillStyle = shade(roof, k % 2 ? 1.04 : 0.96);
+    poly(ctx, [P(0, a, lift + rise), P(su, a, lift + rise), P(su, b, lift), P(0, b, lift)]);
+    ctx.fill();
+    ctx.strokeStyle = shade(roof, 1.24);
+    ctx.beginPath();
+    ctx.moveTo(P(0, a, lift + rise).x, P(0, a, lift + rise).y);
+    ctx.lineTo(P(su, a, lift + rise).x, P(su, a, lift + rise).y);
+    ctx.stroke();
+  }
+}
+
 // ------------------------------------------------------------------ roofs --
 
 /** Hipped roof: four triangles meeting at a central apex. */

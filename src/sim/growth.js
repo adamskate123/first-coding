@@ -8,7 +8,7 @@
  * value sits right on a threshold.
  */
 
-import { ZONE_INFO, Z, WEALTH_THRESHOLDS, WEALTH_HYSTERESIS } from '../config.js';
+import { ZONE_INFO, Z, BUILDINGS, WEALTH_THRESHOLDS, WEALTH_HYSTERESIS } from '../config.js';
 import { clamp } from '../util.js';
 
 /**
@@ -210,9 +210,21 @@ export function tallyCity(world) {
 
   const st = world.stats;
   st.population = pop;
+  // Civic buildings employ people too. Leaving them out meant a city could
+  // pour money into services and watch its unemployment stay exactly where it
+  // was, which is not how any of this works.
+  let jobsS = 0;
+  for (const b of world.activeBuildings()) {
+    const spec = BUILDINGS[b.type];
+    if (!b.on || !spec.jobs) continue;
+    if (spec.category !== 'park' && !b.powered) continue;
+    jobsS += spec.jobs;
+  }
+
   st.jobsC = jobsC;
   st.jobsI = jobsI;
-  st.jobs = jobsC + jobsI;
+  st.jobsS = jobsS;
+  st.jobs = jobsC + jobsI + jobsS;
   st.avgLandValue = lvCount ? lvSum / lvCount : 0;
   st.avgPollution = lvCount ? pollSum / lvCount : 0;
 

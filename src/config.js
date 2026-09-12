@@ -9,7 +9,7 @@
  * Minor versions track feature releases (bridges, wealth tiers, eras, relief);
  * the patch digit is for fixes and tuning.
  */
-export const VERSION = '0.15.0';
+export const VERSION = '0.16.0';
 
 /**
  * Central tuning constants.
@@ -49,13 +49,17 @@ export const SPEED_TICK_MS = [Infinity, 420, 150, 45];
 /**
  * Ticks in one day/night cycle.
  *
- * Paced for watching rather than for the calendar: at normal speed this is
- * about half a minute of real time, where a cycle tied honestly to the
- * month counter would be either a strobe or a slideshow. Cities have always
- * lied about this -- the point of nightfall in a city builder is to show you
- * the city you built with its lights on.
+ * Paced for watching rather than for the calendar: a cycle tied honestly to
+ * the month counter would be either a strobe or a slideshow. Cities have
+ * always lied about this -- the point of nightfall in a city builder is to
+ * show you the city you built with its lights on.
+ *
+ * At 240 it was a strobe: thirty-six seconds of real time at normal speed, so
+ * the city never settled into either state long enough to be looked at, and
+ * fast-forwarding made it flicker. Three minutes at normal speed gives
+ * nightfall time to be an event rather than a flash.
  */
-export const DAY_TICKS = 240;
+export const DAY_TICKS = 1200;
 
 export const VEHICLE_FRAME_MS = 1000 / 30;
 export const VEHICLE_RATE = [0, 0.85, 1, 1.4];
@@ -203,20 +207,60 @@ export const ROAD_REACH = 3;
  * looks right. Deliberately flat things -- solar arrays, parks, plazas -- carry
  * a small height on purpose.
  */
+/**
+ * The catalogue.
+ *
+ * `capacity` is how many residents a service can look after, city-wide. It
+ * replaced a radius: coverage used to be a disc stamped around each building,
+ * which meant a city's service provision was a map-reading exercise with no
+ * legible relationship between what you built and what you got. A capacity
+ * against the population is a number a player can reason about -- one more
+ * school is another 3,500 people covered, wherever it stands.
+ *
+ * `jobs` is how many people the building employs. Civic buildings are
+ * employers like any other, and leaving them out of the labour market was
+ * part of why a city could sit on high unemployment with nothing to do
+ * about it.
+ *
+ * `from` is the year the thing could first be built. A city that plays from
+ * 1900 to the present ought to have a different catalogue at each end of that
+ * run: the point of a century passing is that it brings something with it.
+ * Anything without a `from` has always been available.
+ */
 export const BUILDINGS = {
-  coal:   { name: 'Coal Power Plant',  span: 3, height: 46, cost: 8000,  upkeep: 320, supply: 6000,  pollution: 46, color: '#7d7468', category: 'power' },
-  gas:    { name: 'Gas Power Plant',   span: 3, height: 42, cost: 13000, upkeep: 470, supply: 9500,  pollution: 20, color: '#8d8577', category: 'power' },
-  solar:  { name: 'Solar Farm',        span: 4, height: 9,  cost: 24000, upkeep: 210, supply: 5200,  pollution: 0,  color: '#4a5a72', category: 'power' },
-  police: { name: 'Police Station',    span: 2, height: 30, cost: 900,   upkeep: 110, service: 'police',    radius: 18, color: '#3f5b86', category: 'service' },
-  fire:   { name: 'Fire Station',      span: 2, height: 28, cost: 1000,  upkeep: 130, service: 'fire',      radius: 16, color: '#9c3b32', category: 'service' },
-  clinic: { name: 'Health Clinic',     span: 2, height: 32, cost: 1400,  upkeep: 175, service: 'health',    radius: 16, color: '#c9c3b6', category: 'service' },
-  school: { name: 'Grade School',      span: 3, height: 40, cost: 2600,  upkeep: 260, service: 'education', radius: 20, color: '#a8875e', category: 'service' },
-  park:   { name: 'Small Park',        span: 1, height: 0,  cost: 160,   upkeep: 12,  service: 'park',      radius: 8,  color: '#3f7d3a', category: 'park' },
-  plaza:  { name: 'Plaza',             span: 2, height: 0,  cost: 700,   upkeep: 38,  service: 'park',      radius: 13, color: '#a89a80', category: 'park' },
+  coal:   { name: 'Coal Power Plant',  span: 3, height: 46, cost: 8000,  upkeep: 320, supply: 6000,  pollution: 46, jobs: 90, color: '#7d7468', category: 'power' },
+  gas:    { name: 'Gas Power Plant',   span: 3, height: 42, cost: 13000, upkeep: 470, supply: 9500,  pollution: 20, jobs: 65, color: '#8d8577', category: 'power', from: 1938 },
+  solar:  { name: 'Solar Farm',        span: 4, height: 9,  cost: 24000, upkeep: 210, supply: 5200,  pollution: 0,  jobs: 20, color: '#4a5a72', category: 'power', from: 1982 },
+  wind:   { name: 'Wind Farm',         span: 3, height: 12, cost: 19000, upkeep: 160, supply: 4400,  pollution: 0,  jobs: 14, color: '#c8ccd2', category: 'power', from: 1996 },
+  police: { name: 'Police Station',    span: 2, height: 30, cost: 900,   upkeep: 110, service: 'police',    capacity: 6000, jobs: 32, color: '#3f5b86', category: 'service' },
+  fire:   { name: 'Fire Station',      span: 2, height: 28, cost: 1000,  upkeep: 130, service: 'fire',      capacity: 5500, jobs: 28, color: '#9c3b32', category: 'service' },
+  clinic: { name: 'Health Clinic',     span: 2, height: 32, cost: 1400,  upkeep: 175, service: 'health',    capacity: 4500, jobs: 44, color: '#c9c3b6', category: 'service' },
+  school: { name: 'Grade School',      span: 3, height: 40, cost: 2600,  upkeep: 260, service: 'education', capacity: 3500, jobs: 58, color: '#a8875e', category: 'service' },
+  hospital: { name: 'Hospital',        span: 3, height: 58, cost: 7200,  upkeep: 640, service: 'health',    capacity: 19000, jobs: 210, color: '#dfe3e2', category: 'service', from: 1952 },
+  park:   { name: 'Small Park',        span: 1, height: 0,  cost: 160,   upkeep: 12,  service: 'park',      capacity: 1400, jobs: 2,  color: '#3f7d3a', category: 'park' },
+  plaza:  { name: 'Plaza',             span: 2, height: 0,  cost: 700,   upkeep: 38,  service: 'park',      capacity: 3200, jobs: 5,  color: '#a89a80', category: 'park' },
 };
 
 /** Power drawn by each service building while it operates. */
-export const BUILDING_POWER = { police: 40, fire: 40, clinic: 60, school: 70, park: 0, plaza: 5 };
+export const BUILDING_POWER = {
+  police: 40, fire: 40, clinic: 60, hospital: 260, school: 70, park: 0, plaza: 5,
+};
+
+/** The year the city starts in, and so the year the catalogue starts at. */
+export const CATALOGUE_START = 1900;
+
+/** Can this be built yet? */
+export function isUnlocked(type, year) {
+  const spec = BUILDINGS[type];
+  return !!spec && year >= (spec.from || CATALOGUE_START);
+}
+
+/** Everything that becomes available in a given year, newest first. */
+export function unlockedIn(year) {
+  return Object.entries(BUILDINGS)
+    .filter(([, spec]) => spec.from === year)
+    .map(([key]) => key);
+}
 
 // ----------------------------------------------------------------- economy --
 

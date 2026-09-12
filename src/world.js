@@ -76,6 +76,10 @@ export class World {
       income: 0, expenses: 0, lastBalance: 0,
       powerSupply: 0, powerDemand: 0, brownout: false,
       avgLandValue: 0, avgPollution: 0, approval: 50, congestion: 0,
+      // Per service: how many people it can look after, how many there are,
+      // and the fraction that leaves covered.
+      service: {},
+      jobsC: 0, jobsI: 0, jobsS: 0,
     };
     /**
      * Bumped whenever something that is *drawn* changes.

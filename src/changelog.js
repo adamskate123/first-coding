@@ -15,6 +15,21 @@ import { VERSION } from './config.js';
 
 export const CHANGELOG = [
   {
+    version: '0.16.0',
+    headline: 'Services you can count, demand you can read, a century you can feel',
+    changes: [
+      'Services are now provided city-wide against a capacity instead of a radius on the map. The city panel says how many residents each one covers and how many are going without, so one more school is a decision you can actually make.',
+      'Civic buildings employ people. A police station, a school or a power plant is an employer like any other, and their staff now count against unemployment.',
+      'Demand was ignoring your unemployed. Industry and commerce now expand when there are workers with nowhere to go, which is what was missing when a seventh of the city was out of work and the industrial bar would not move.',
+      'The city panel explains each demand bar: the three things pushing it up or down, strongest first. No more guessing what industry is waiting for.',
+      'New things unlock as the decades pass — gas in 1938, the hospital in 1952, solar in 1982, wind in 1996 — and the city tells you when one arrives.',
+      'Avenues are divided carriageways now: a kerbed and planted median, lanes either side, and kerbs where the road ends. They no longer look like streets.',
+      'Industry looks like industry: north-light sheds, loading docks, silos, tanks, stacks and gantries behind a palisade, instead of the same houses in beige.',
+      'Bridges got proper piers on a spacing, abutments where they meet the bank, and railings with posts — and no longer put a step across the road at each end.',
+      'Nightfall takes three minutes instead of thirty-six seconds, and night eases to deep blue rather than to black.',
+    ],
+  },
+  {
     version: '0.15.0',
     headline: 'Every civic building is its own building now',
     changes: [

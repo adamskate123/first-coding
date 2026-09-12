@@ -20,6 +20,14 @@ import { hash2, clamp } from '../util.js';
 /** Neighbour offsets, indexed the same way as frontage() and quadEdgeMid(). */
 const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 
+/** Tiles between a bridge's piers, and posts per railing run. */
+const PIER_SPACING = 3;
+const RAIL_POSTS = 3;
+
+/** Half-width of an avenue's median, and how far its lane markings clear it. */
+const MEDIAN_HALF = 3.4;
+const LANE_OFFSET = 5.6;
+
 /** Middle of a tile's surface. */
 export function quadCentre(q) {
   return {
@@ -145,9 +153,10 @@ export class Renderer {
   nightAmount() {
     if (!this.showNight) return 0;
     const t = ((this.world.tick % DAY_TICKS) + DAY_TICKS) % DAY_TICKS / DAY_TICKS;
-    // Flat daylight for the first half, then down into night and back.
+    // Daylight over most of the cycle, easing down into a night that never
+    // reaches pitch black -- a city you cannot read is not worth showing.
     const k = Math.cos(t * Math.PI * 2);
-    return clamp((0.35 - k) / 1.1, 0, 1);
+    return clamp((0.15 - k) / 1.35, 0, 1);
   }
 
   /** Whether the windows are on, which is what the sprite cache keys off. */
@@ -533,22 +542,100 @@ export class Renderer {
     this.quadPath(quad);
     ctx.fill();
 
-    // Centre markings run towards each connected neighbour, so junctions and
-    // dead ends read correctly without a tileset.
     const centre = quadCentre(quad);
-    ctx.strokeStyle = ROAD_COLORS.markings;
-    ctx.lineWidth = isAvenue ? 1.6 : 1;
-    ctx.setLineDash(isAvenue ? [4, 3] : [3, 4]);
-    ctx.beginPath();
+    const arms = [];
     for (let k = 0; k < 4; k++) {
       const nx = x + DIRS[k][0], ny = y + DIRS[k][1];
       if (!w.inBounds(nx, ny) || !w.road[w.idx(nx, ny)]) continue;
-      const edge = quadEdgeMid(quad, k);
-      ctx.moveTo(centre.x, centre.y);
-      ctx.lineTo(edge.x, edge.y);
+      arms.push({ k, edge: quadEdgeMid(quad, k) });
+    }
+
+    // Kerbs along any edge the road does not continue over. A street and an
+    // avenue used to differ only in the dash pattern of one centre line, which
+    // at play zoom is no difference at all; edging the carriageway is what
+    // makes a road look like a road rather than like a grey tile.
+    const open = [0, 1, 2, 3].filter((k) => !arms.some((a) => a.k === k));
+    if (open.length) {
+      ctx.strokeStyle = ROAD_COLORS.kerb;
+      ctx.lineWidth = isAvenue ? 1.6 : 1.1;
+      ctx.beginPath();
+      for (const k of open) {
+        const pair = [[1, 2], [3, 2], [0, 3], [0, 1]][k];
+        ctx.moveTo(quad[pair[0]].x, quad[pair[0]].y);
+        ctx.lineTo(quad[pair[1]].x, quad[pair[1]].y);
+      }
+      ctx.stroke();
+    }
+
+    if (isAvenue) this.drawMedian(quad, centre, arms);
+
+    // Lane markings run towards each connected neighbour, so junctions and
+    // dead ends read correctly without a tileset. An avenue's run either side
+    // of its median; a street's is a single dashed line down the middle.
+    ctx.strokeStyle = ROAD_COLORS.markings;
+    ctx.lineWidth = 1;
+    ctx.setLineDash(isAvenue ? [5, 4] : [3, 4]);
+    ctx.beginPath();
+    for (const { edge } of arms) {
+      if (!isAvenue) {
+        ctx.moveTo(centre.x, centre.y);
+        ctx.lineTo(edge.x, edge.y);
+        continue;
+      }
+      // Offset perpendicular to the arm, in screen space, so the two lanes sit
+      // either side of the median whichever way the avenue runs.
+      const dx = edge.x - centre.x, dy = edge.y - centre.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const px = -dy / len * LANE_OFFSET, py = dx / len * LANE_OFFSET;
+      for (const sign of [-1, 1]) {
+        ctx.moveTo(centre.x + px * sign, centre.y + py * sign);
+        ctx.lineTo(edge.x + px * sign, edge.y + py * sign);
+      }
     }
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+
+  /**
+   * The median that divides an avenue.
+   *
+   * Drawn as a band from the middle of the tile out to each edge the road
+   * continues over, so the medians of neighbouring tiles meet and a run of
+   * avenue reads as one continuous divided road. At a junction the bands meet
+   * in the middle and form the island a junction actually has; at a corner or
+   * a dead end the band simply stops, which is what happens on the ground.
+   */
+  drawMedian(quad, centre, arms) {
+    const ctx = this.ctx;
+    if (!arms.length) return;
+
+    const band = (width, fill) => {
+      ctx.fillStyle = fill;
+      for (const { edge } of arms) {
+        const dx = edge.x - centre.x, dy = edge.y - centre.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const px = -dy / len * width, py = dx / len * width;
+        ctx.beginPath();
+        ctx.moveTo(centre.x + px, centre.y + py);
+        ctx.lineTo(edge.x + px, edge.y + py);
+        ctx.lineTo(edge.x - px, edge.y - py);
+        ctx.lineTo(centre.x - px, centre.y - py);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // The middle, so the arms join without a notch at the centre.
+      ctx.beginPath();
+      ctx.ellipse(centre.x, centre.y, width * 2, width, 0, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    band(MEDIAN_HALF, ROAD_COLORS.medianEdge);
+    band(MEDIAN_HALF - 0.9, ROAD_COLORS.median);
+    // A straight run gets planting; a junction does not, because a junction
+    // with a hedge through it would be a junction nobody could drive across.
+    if (arms.length === 2 && (arms[0].k + 2) % 4 === arms[1].k) {
+      band(MEDIAN_HALF - 2.1, ROAD_COLORS.planting);
+    }
   }
 
   /**
@@ -572,29 +659,76 @@ export class Renderer {
     // on every frame a bridge was visible, which killed the animation loop and
     // froze the game outright.
     const deckQuad = flatQuad(x, y, height);
-    // Piers reach from the deck down to whatever is beneath: the waterline out
+    // How far the deck stands above whatever is beneath it: the waterline out
     // over the channel, the ground itself where the deck lands on a bank.
     const base = terrain === T.WATER ? SEA_LEVEL : w.tileHeight(x, y);
     const lift = Math.max(0, (height - base) * ELEV_STEP);
 
-    // piers dropping to the waterline
-    ctx.fillStyle = '#544f46';
     const cx = deck.x, cy = deck.y + TILE_H / 2;
-    ctx.fillRect(cx - 9, cy, 4, lift + 3);
-    ctx.fillRect(cx + 5, cy, 4, lift + 3);
 
-    // the deck's own thickness, along the two edges facing the viewer
-    const THICK = 4;
-    ctx.fillStyle = '#443f39';
-    ctx.beginPath();
-    ctx.moveTo(deck.x - TILE_W / 2, deck.y + TILE_H / 2);
-    ctx.lineTo(deck.x, deck.y + TILE_H);
-    ctx.lineTo(deck.x + TILE_W / 2, deck.y + TILE_H / 2);
-    ctx.lineTo(deck.x + TILE_W / 2, deck.y + TILE_H / 2 + THICK);
-    ctx.lineTo(deck.x, deck.y + TILE_H + THICK);
-    ctx.lineTo(deck.x - TILE_W / 2, deck.y + TILE_H / 2 + THICK);
-    ctx.closePath();
-    ctx.fill();
+    if (lift > 2) {
+      // Piers every few tiles rather than under every one. A pair of legs on
+      // each tile of a six-tile span came out as a picket fence under the
+      // road: the eye counts them, and a bridge with twelve piers across a
+      // creek reads as scaffolding rather than as a crossing.
+      if ((x + y) % PIER_SPACING === 0) {
+        ctx.fillStyle = '#4b463e';
+        ctx.fillRect(cx - 11, cy, 5, lift + 2);
+        ctx.fillRect(cx + 6, cy, 5, lift + 2);
+        // A cap beam tying the legs together under the deck.
+        ctx.fillStyle = '#3e3932';
+        ctx.fillRect(cx - 13, cy - 1, 26, 4);
+        // and a cross brace, which is what says the legs are one pier
+        if (lift > 16) {
+          ctx.strokeStyle = '#443f38';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(cx - 8, cy + lift * 0.75);
+          ctx.lineTo(cx + 8, cy + lift * 0.35);
+          ctx.moveTo(cx + 8, cy + lift * 0.75);
+          ctx.lineTo(cx - 8, cy + lift * 0.35);
+          ctx.stroke();
+        }
+      }
+
+      // The deck's own thickness, along the two edges facing the viewer. Only
+      // where the deck is actually off the ground -- drawn on a bank tile it
+      // was a four-pixel lip across the road, which is the step you could see
+      // at both ends of every bridge.
+      const THICK = 5;
+      ctx.fillStyle = '#463f37';
+      ctx.beginPath();
+      ctx.moveTo(deck.x - TILE_W / 2, deck.y + TILE_H / 2);
+      ctx.lineTo(deck.x, deck.y + TILE_H);
+      ctx.lineTo(deck.x + TILE_W / 2, deck.y + TILE_H / 2);
+      ctx.lineTo(deck.x + TILE_W / 2, deck.y + TILE_H / 2 + THICK);
+      ctx.lineTo(deck.x, deck.y + TILE_H + THICK);
+      ctx.lineTo(deck.x - TILE_W / 2, deck.y + TILE_H / 2 + THICK);
+      ctx.closePath();
+      ctx.fill();
+      // A lighter girder line where the deck edge catches the light.
+      ctx.strokeStyle = '#6d6559';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(deck.x - TILE_W / 2, deck.y + TILE_H / 2);
+      ctx.lineTo(deck.x, deck.y + TILE_H);
+      ctx.lineTo(deck.x + TILE_W / 2, deck.y + TILE_H / 2);
+      ctx.stroke();
+    } else {
+      // An abutment where the span lands: the bank is carrying the deck here,
+      // and without something to carry it the road simply stopped being a
+      // bridge halfway across a tile.
+      ctx.fillStyle = '#5a534a';
+      ctx.beginPath();
+      ctx.moveTo(deck.x - TILE_W / 2, deck.y + TILE_H / 2);
+      ctx.lineTo(deck.x, deck.y + TILE_H);
+      ctx.lineTo(deck.x + TILE_W / 2, deck.y + TILE_H / 2);
+      ctx.lineTo(deck.x + TILE_W / 2, deck.y + TILE_H / 2 + 2);
+      ctx.lineTo(deck.x, deck.y + TILE_H + 2);
+      ctx.lineTo(deck.x - TILE_W / 2, deck.y + TILE_H / 2 + 2);
+      ctx.closePath();
+      ctx.fill();
+    }
 
     this.drawRoad(x, y, i, deckQuad);
 
@@ -608,19 +742,34 @@ export class Renderer {
       [x + 1, y, R_, B_], [x - 1, y, T_, L_],
       [x, y + 1, L_, B_], [x, y - 1, T_, R_],
     ];
-    const RAIL_H = 6;
-    ctx.strokeStyle = '#a49d8e';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
+    const RAIL_H = 7;
     for (const [nx, ny, a, b] of edges) {
       if (w.inBounds(nx, ny) && w.road[w.idx(nx, ny)]) continue;
+      // Posts first, then the rail over them, so the rail reads as continuous
+      // and the posts as standing behind it.
+      ctx.strokeStyle = '#6f6a5e';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      for (let k = 0; k <= RAIL_POSTS; k++) {
+        const f = k / RAIL_POSTS;
+        const px = a.x + (b.x - a.x) * f, py = a.y + (b.y - a.y) * f;
+        ctx.moveTo(px, py - RAIL_H);
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = '#b0a996';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
       ctx.moveTo(a.x, a.y - RAIL_H);
       ctx.lineTo(b.x, b.y - RAIL_H);
-      // posts at the ends, so a long run reads as railing rather than a stripe
-      ctx.moveTo(a.x, a.y - RAIL_H); ctx.lineTo(a.x, a.y);
-      ctx.moveTo(b.x, b.y - RAIL_H); ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.strokeStyle = '#8b8576';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y - RAIL_H * 0.5);
+      ctx.lineTo(b.x, b.y - RAIL_H * 0.5);
+      ctx.stroke();
     }
-    ctx.stroke();
 
     return deckQuad;
   }

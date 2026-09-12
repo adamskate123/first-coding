@@ -32,6 +32,7 @@ import {
   hipRoof, gableRoof, flatRoofDetail, chimney, awning,
 } from './volumes.js';
 import { civicSprite, CIVIC_HEADROOM } from './civic.js';
+import { isWorks, drawWorks, worksHeight, worksHeadroom } from './works.js';
 
 const PAD = 10;
 
@@ -478,6 +479,23 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1) 
   const key = `z:${zoneKey}:${level}:${variant}:${wealth}:${era}:${lit ? 1 : 0}:${span}`;
   const hit = cacheGet(key);
   if (hit) return hit;
+
+  // Industry is drawn by its own generator. Sharing the house vocabulary is
+  // what made a light-industrial lot come out as a cottage and a heavy one as
+  // an apartment block: a works is long and low, roofed north-light or flat,
+  // glazed at the eaves, and surrounded by plant -- none of which the massing
+  // and facade grammar can express.
+  if (isWorks(zoneKey)) {
+    const height = worksHeight(zoneKey, level, era);
+    const totalH = height + worksHeadroom(zoneKey, level) + 24;
+    const w = span * TILE_W + PAD * 2;
+    const h = span * TILE_H + totalH + PAD * 2 + FOOT;
+    const canvas = makeCanvas(w, h);
+    const ctx = canvas.getContext('2d');
+    const ox = w / 2, oy = totalH + PAD;
+    drawWorks(ctx, ox, oy, zoneKey, level, variant, wealth, era, lit, span);
+    return cacheSet(key, { canvas, ox: -ox, oy: -oy });
+  }
 
   const rec = buildingRecipe(zoneKey, level, variant, wealth, era);
   const palettes = buildingPalette(zoneKey[0], rec.wealth);
