@@ -15,6 +15,17 @@ import { VERSION } from './config.js';
 
 export const CHANGELOG = [
   {
+    version: '0.21.0',
+    headline: 'Your city stops being dug up',
+    changes: [
+      'Streets are no longer cut through buildings that are already standing. Pulling down a house that already fronted a road you drew, to give frontage to one behind it, made no sense — and a district halfway through that conversion was a scatter of stubs rather than streets. That was a bad call in the last release and it is reverted.',
+      'Land you zone from here still gets the full layout. Land already built keeps what it has, and your bulldozer is what changes that.',
+      'A lane now reads as a piece of street even before the next stretch is laid, instead of a stub with a blob on the end.',
+      'Driveways were drawn wide and pale, and with every plot fronting a street there was one on every lot — a scatter of light slabs between the houses that read as broken road. They are narrow paths now.',
+      'The tan grid between lawns is gone: plot margins were wide enough to join up across a district into something that looked like a path network.',
+    ],
+  },
+  {
     version: '0.20.0',
     headline: 'Those green lines were hedges, not streets',
     changes: [

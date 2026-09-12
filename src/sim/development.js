@@ -43,24 +43,24 @@ export function updateDevelopment(world, rng) {
 /**
  * Is this a plot a developer could cut a lane across?
  *
- * Never water, and never a plot carrying something the player put there by
- * hand -- a catalogue building is not a developer's to demolish.
+ * Not one with anything standing on it.
  *
- * A house is. It has to be: a district built out before its streets existed
- * has a building on every tile of the lattice, so a network that refuses to
- * path through developed land can never be laid at all. Measured on a
- * district built solid first, then run for 6,000 ticks: no lane laid
- * anywhere, and 893 of 896 plots still with no street beside them. Cutting a
- * street through built-up land is how real cities got theirs, and the plots
- * either side of the new one are worth more for it.
+ * Cutting streets through built-up land was tried, on the reasoning that a
+ * district laid out before its streets existed can never get them otherwise --
+ * every tile of the lattice has a building on it, so the network cannot be
+ * laid at all. That reasoning is sound and the result was still wrong: a house
+ * already fronting a road the player had drawn would be pulled down to give
+ * frontage to one behind it, which makes no sense to anybody watching, and a
+ * district mid-conversion was a scatter of half-laid stubs rather than
+ * streets.
+ *
+ * So an established district keeps what it has. Land zoned from here gets the
+ * layout; land already built does not, and the player's own bulldozer is the
+ * thing that changes that.
  */
 function developable(world, i) {
-  return world.terrain[i] !== T.WATER && world.build[i] === -1;
-}
-
-/** Is anything standing here that laying a lane would pull down? */
-function occupied(world, i) {
-  return world.level[i] > 0 || world.stage[i] > 0;
+  return world.terrain[i] !== T.WATER && world.build[i] === -1
+    && world.level[i] === 0 && world.stage[i] === 0;
 }
 
 /**
@@ -117,31 +117,17 @@ function layLanes(world, rng) {
   }
   if (!candidates.length) return;
 
-  // Work out where each candidate would actually put its next stretch of lane
-  // -- the far end of the network on the way to it, not the candidate itself
-  // -- and order by what that stretch would cost.
-  //
-  // Empty ground first, every time. A lane that can be laid across a field is
-  // laid there rather than through somebody's house, so a district being built
-  // out now costs nothing and only one already standing pays. Sorting the
-  // candidates instead of the tiles that would be laid got this backwards:
-  // the plot needing frontage is not the plot the bulldozer reaches.
-  const heads = new Map();
-  for (const target of candidates) {
-    let at = target;
-    while (from[at] !== -1 && dist[from[at]] > 0) at = from[at];
-    heads.set(target, at);
-  }
-  candidates.sort((a, b) => {
-    const costA = occupied(world, heads.get(a)) ? 1 : 0;
-    const costB = occupied(world, heads.get(b)) ? 1 : 0;
-    return costA - costB || dist[a] - dist[b] || a - b;
-  });
+  // Nearest first, so the network grows outward from the road in order rather
+  // than sprouting in three places at once.
+  candidates.sort((a, b) => dist[a] - dist[b] || a - b);
 
   let laid = 0;
   for (const target of candidates) {
     if (laid >= LANES_PER_PASS) break;
-    const at = heads.get(target);
+    // Walk back to the tile whose parent is already road: the far end of the
+    // network, and so the next stretch of lane.
+    let at = target;
+    while (from[at] !== -1 && dist[from[at]] > 0) at = from[at];
     if (world.road[at] || !developable(world, at)) continue;
     // Re-checked here rather than trusted from the sweep: a lane laid earlier
     // in this same pass may already have given these plots their frontage.

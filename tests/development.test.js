@@ -156,25 +156,27 @@ test('empty ground is taken before anybody\'s house is', () => {
   assert.equal(lost.length, 0, `${lost.length} houses pulled down on open land`);
 });
 
-test('a district built out before its streets existed still gets them', () => {
-  // The case an existing city is in. Every tile of the lattice has a house on
-  // it, so a network that refuses to path through developed land can never be
-  // laid at all: measured, no lane anywhere and 893 of 896 plots still with no
-  // street after 6,000 ticks. Cutting a street through built-up land is how
-  // real cities got theirs.
+test('an established district keeps its buildings', () => {
+  // Cutting streets through built-up land was tried, so that a district laid
+  // out before its streets existed could still get them. It is how real cities
+  // got theirs and it was still wrong here: a house already fronting a road
+  // the player had drawn would be pulled down to give frontage to one behind
+  // it, and a district mid-conversion was a scatter of half-laid stubs. Land
+  // already built keeps what it has; the player's bulldozer is what changes
+  // that.
   const w = subdivision();
   for (let i = 0; i < w.zone.length; i++) {
     if (w.zone[i] && !w.road[i]) { w.level[i] = 2; w.pop[i] = 20; }
   }
+  const before = Array.from(w.level);
   develop(w, 4000);
 
-  assert.ok(countLanes(w) > 0, 'no street was ever cut through the district');
-  let stranded = 0;
-  for (let i = 0; i < w.zone.length; i++) {
-    if (!w.zone[i] || w.road[i]) continue;
-    if (!hasFrontage(w, i)) stranded++;
+  for (let i = 0; i < before.length; i++) {
+    if (before[i] > 0) {
+      assert.notEqual(w.road[i], ROAD.LANE, `a house at ${i % w.size},${(i / w.size) | 0} was pulled down for a lane`);
+    }
   }
-  assert.ok(stranded < 40, `${stranded} plots still have no street beside them`);
+  assert.deepEqual(Array.from(w.level), before, 'nothing standing should have been touched');
 });
 
 test('a lane is never cut through something the player placed', () => {
