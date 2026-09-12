@@ -55,6 +55,9 @@ export class World {
     this.roadAccess = new Uint8Array(n);
     this.netId = new Int32Array(n).fill(-1);   // power network membership
     this.deckHeight = new Float32Array(n);     // height a bridge deck sits at
+    // How far through construction a plot is: 0 for settled ground, 1 up to
+    // BUILD_STAGES while something is going up on it.
+    this.stage = new Uint8Array(n);
     this.growthTimer = new Int8Array(n);       // hysteresis for grow/decay
     this.coverage = {};
     for (const k of SERVICE_KEYS) this.coverage[k] = new Uint8Array(n);
@@ -242,6 +245,7 @@ export class World {
     this.pop[i] = 0;
     this.jobs[i] = 0;
     this.growthTimer[i] = 0;
+    if (this.stage[i]) { this.stage[i] = 0; changed = true; }
     return changed;
   }
 

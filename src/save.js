@@ -62,6 +62,7 @@ export function serialize(world, camera = null) {
     road: encode(world.road),
     powerLine: encode(world.powerLine),
     level: encode(world.level),
+    stage: encode(world.stage),
     builtAge: encode(world.builtAge),
     buildings: [...world.activeBuildings()].map((b) => ({ t: b.type, x: b.x, y: b.y, on: b.on })),
     log: world.log.slice(-20),
@@ -88,6 +89,9 @@ export function deserialize(data) {
   world.powerLine.set(decode(data.powerLine, Uint8Array));
   world.level.set(decode(data.level, Uint8Array));
   if (data.builtAge) world.builtAge.set(decode(data.builtAge, Uint8Array));
+  // Cities saved before building sites existed simply resume with none in
+  // progress, which is the right answer: everything standing is finished.
+  if (data.stage) world.stage.set(decode(data.stage, Uint8Array));
 
   world.funds = data.funds;
   world.tick = data.tick;

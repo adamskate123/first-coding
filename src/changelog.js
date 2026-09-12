@@ -15,6 +15,17 @@ import { VERSION } from './config.js';
 
 export const CHANGELOG = [
   {
+    version: '0.17.0',
+    headline: 'Districts get laid out and built, instead of appearing',
+    changes: [
+      'Zone a block and developers now subdivide it: lanes are cut into land that has no frontage yet, one stretch at a time, working outward from the road you laid. They are narrower than a street, you do not pay for them, and once a district is laid out the layout stays — later buildings go up and are replaced along the same lanes.',
+      'Nothing appears finished any more. A plot is cleared and hoarded, then its footings go in, then a frame, then a shell under scaffold, and only then a building. A district being built out looks like one: several plots at different stages along a new lane.',
+      'A big block no longer develops only around its rim. The interior was simply out of reach of any road before, and there was nothing you could do about it short of drawing a street grid by hand.',
+      'Redevelopment shows: a house being improved gets scaffolding and a skip, a tower gets a crane.',
+      'Work stops if a site loses its road or its power, rather than finishing regardless.',
+    ],
+  },
+  {
     version: '0.16.0',
     headline: 'Services you can count, demand you can read, a century you can feel',
     changes: [

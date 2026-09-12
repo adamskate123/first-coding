@@ -9,7 +9,7 @@
  * Minor versions track feature releases (bridges, wealth tiers, eras, relief);
  * the patch digit is for fixes and tuning.
  */
-export const VERSION = '0.16.0';
+export const VERSION = '0.17.0';
 
 /**
  * Central tuning constants.
@@ -142,11 +142,69 @@ export const ZONE_POLLUTION = {
 
 // ------------------------------------------------------------------- roads --
 
-export const ROAD = { NONE: 0, STREET: 1, AVENUE: 2 };
+/**
+ * Road types.
+ *
+ * A lane is not on the palette: it is laid by developers, not by the mayor.
+ * Zoning a large block and watching houses appear on it out of nowhere was
+ * always the least convincing thing the game did -- land does not become a
+ * suburb, it gets subdivided first. Lanes are how that subdivision happens,
+ * and making them an ordinary road type means access, traffic, power reach,
+ * upkeep and the save file all handle them without knowing they are special.
+ */
+export const ROAD = { NONE: 0, STREET: 1, AVENUE: 2, LANE: 3 };
 export const ROAD_INFO = {
   [ROAD.STREET]: { name: 'Street', cost: 18, upkeep: 0.7, capacity: 220 },
   [ROAD.AVENUE]: { name: 'Avenue', cost: 55, upkeep: 2.1, capacity: 700 },
+  [ROAD.LANE]: { name: 'Lane', cost: 0, upkeep: 0.2, capacity: 90, developer: true },
 };
+
+// ------------------------------------------------------------ development --
+
+/**
+ * How land turns into a neighbourhood.
+ *
+ * Two things happen before a house does. Developers cut lanes into whatever
+ * they have bought that has no frontage yet, one tile at a time, working out
+ * from the road the city laid. Then every plot spends time as a building site
+ * before it is a building.
+ *
+ * Both are deliberately slow. The point is that a district you zone should be
+ * something you watch arrive over years, not something that appears between
+ * two glances at the same corner of the map.
+ */
+export const LANE_INTERVAL = 6;      // ticks between one pass of the developers
+export const LANES_PER_PASS = 2;     // and how much lane they lay in one
+export const LANE_DEMAND = -0.15;    // nobody subdivides into a dead market
+
+/**
+ * The lattice lanes are laid on.
+ *
+ * Without one they simply spread: every unserved plot pulls a lane towards
+ * itself, the lane arrives, the plot behind it is now the unserved one, and a
+ * block ends up 94% road. Measured exactly that on a 36x32 block -- 1,080 of
+ * 1,152 plots became lane.
+ *
+ * Rows at a pitch of twice ROAD_REACH plus one means every plot is in reach of
+ * one and none is in reach of two, which is the tightest a subdivision can be
+ * laid out without wasting land. Cross-streets are rarer, because a suburb
+ * needs a way through but not one every block. Both are keyed to absolute map
+ * coordinates, so the grid is the same wherever a district happens to start
+ * and neighbouring districts line up.
+ */
+export const LANE_ROW_PITCH = 7;
+export const LANE_COL_PITCH = 14;
+export const LANE_ROW_OFFSET = 3;
+export const LANE_COL_OFFSET = 6;
+
+/** Is this tile on the lattice a developer would lay a lane along? */
+export function onLaneGrid(x, y) {
+  return y % LANE_ROW_PITCH === LANE_ROW_OFFSET || x % LANE_COL_PITCH === LANE_COL_OFFSET;
+}
+
+/** Steps a building site passes through, and the chance of a step per tick. */
+export const BUILD_STAGES = 4;
+export const STAGE_CHANCE = 0.05;
 
 /**
  * How far power carries between conductive tiles, in tiles.

@@ -10,6 +10,7 @@
 
 import { ZONE_INFO, Z, BUILDINGS, WEALTH_THRESHOLDS, WEALTH_HYSTERESIS } from '../config.js';
 import { clamp } from '../util.js';
+import { reservedForLane } from './development.js';
 
 /**
  * Timer units needed to add or drop a level.
@@ -73,6 +74,13 @@ export function updateGrowth(world, rng) {
     const maxLevel = info.cap.length - 1;
     const level = world.level[i];
     const demand = world.demand[info.cat];
+
+    // Land the developers have platted as street is not built on.
+    if (reservedForLane(world, i)) {
+      if (world.stage[i]) { world.stage[i] = 0; world.touch(); }
+      world.growthTimer[i] = 0;
+      continue;
+    }
 
     // --- hard requirements ------------------------------------------------
     const connected = world.roadAccess[i] === 1;
@@ -138,28 +146,28 @@ export function updateGrowth(world, rng) {
     }
 
     // --- resolve -----------------------------------------------------------
+    // Growth breaks ground; it no longer hands over a finished building. What
+    // happens next is construction's business, in development.js -- a lot is
+    // stamped with its period when it is first *completed*, and keeps it
+    // thereafter. Restamping on every level change was tried first and is
+    // wrong in practice: a city that keeps growing re-dates its whole stock,
+    // so a district founded in 1910 and steadily improved reads as brand new
+    // and no historical strata ever survive.
     if (world.growthTimer[i] >= GROW_THRESHOLD && level < maxLevel) {
-      world.level[i] = level + 1;
-      world.touch();
+      if (!world.stage[i]) {
+        world.stage[i] = 1;
+        world.touch();
+      }
       world.growthTimer[i] = 0;
-      // A lot is stamped with its period when it is *first* built out, and
-      // keeps it thereafter.
-      //
-      // Restamping on every level change was tried first and is wrong in
-      // practice: a city that keeps growing re-dates its whole stock, so a
-      // district founded in 1910 and steadily improved reads as brand new, and
-      // no historical strata ever survive. Measured on a city expanded in four
-      // waves across a century, every standing lot came out in a single period.
-      // Only clearing the lot resets the date, which is right -- demolition is
-      // what actually replaces a building.
-      if (level === 0) world.recordBuild(i);
-      world.dirty = true;
     } else if (world.growthTimer[i] <= DECAY_THRESHOLD && level > 0) {
       world.level[i] = level - 1;
+      world.stage[i] = 0;
       world.touch();
       world.growthTimer[i] = 0;
       world.dirty = true;
     }
+    // Nothing gets finished in a district that is emptying out.
+    if (pressure < 0 && world.stage[i]) { world.stage[i] = 0; world.touch(); }
 
     // --- how prosperous the lot presents as -------------------------------
     const tier = wealthTier(world.landValue[i], world.wealth[i]);
