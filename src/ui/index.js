@@ -8,6 +8,8 @@
 
 import { Z, ZONE_INFO, ROAD_INFO, ROAD, BUILDINGS, POWERLINE_COST, BULLDOZE_COST, SPEED_LABELS, TAX_MIN, TAX_MAX, SERVICE_KEYS, WEALTH_NAMES, ERAS, VERSION } from '../config.js';
 import { TOOL } from '../tools.js';
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 import { money, commas, clamp } from '../util.js';
 
 const SERVICE_LABEL = { police: 'Police', fire: 'Fire', health: 'Health', education: 'Schools', park: 'Parks' };
@@ -131,6 +133,14 @@ export class UI {
     if (this.carsToggle) this.carsToggle.checked = on;
   }
 
+  /** Flip the day/night cycle, keeping the checkbox and the key in step. */
+  toggleNight() {
+    const on = !this.game.renderer.showNight;
+    this.game.renderer.showNight = on;
+    this.game.renderer.markDirty();
+    if (this.nightToggle) this.nightToggle.checked = on;
+  }
+
   setActiveTool(tool) {
     for (const b of this.toolButtons) b.classList.toggle('active', b.dataset.tool === tool);
   }
@@ -159,7 +169,14 @@ export class UI {
     this.updateBanner = document.getElementById('update-banner');
     document.getElementById('update-reload').addEventListener('click', () => this.game.applyUpdate());
     document.getElementById('update-later').addEventListener('click', () => this.hideUpdate());
+    this.nightToggle = document.getElementById('toggle-night');
+    this.nightToggle.checked = this.game.renderer.showNight;
+    this.nightToggle.addEventListener('change', (e) => {
+      this.game.renderer.showNight = e.target.checked;
+      this.game.renderer.markDirty();
+    });
     document.getElementById('btn-budget').addEventListener('click', () => this.showBudget());
+    document.getElementById('btn-graphs').addEventListener('click', () => this.showGraphs());
     document.getElementById('btn-save').addEventListener('click', () => this.game.save());
     document.getElementById('btn-load').addEventListener('click', () => {
       if (confirm('Discard changes since the last save and reload the stored city?')) this.game.load();
@@ -387,6 +404,72 @@ export class UI {
   }
 
   // -------------------------------------------------------------- modals --
+
+  /**
+   * The city's own history, which it has been recording all along.
+   *
+   * A monthly snapshot has been written since the first version and nothing
+   * ever displayed it -- two hundred and forty months of population, treasury,
+   * approval and land value serialised into every save file and never read.
+   * Drawn as plain SVG paths: the series are a few hundred points at most, and
+   * a charting library would be larger than the rest of the game.
+   */
+  showGraphs() {
+    const h = this.game.world.history;
+    if (h.length < 2) {
+      this.toast('Not enough history yet -- give the city a few months.');
+      return;
+    }
+
+    const series = [
+      { label: 'Population', color: '#7fb86a', at: (m) => m.population, fmt: commas },
+      { label: 'Treasury', color: '#c9a13b', at: (m) => m.funds, fmt: money },
+      { label: 'Approval', color: '#7fa8d6', at: (m) => m.approval, fmt: (v) => `${Math.round(v)}%` },
+      { label: 'Land value', color: '#c98a5a', at: (m) => m.landValue, fmt: (v) => Math.round(v) },
+      { label: 'Unemployment', color: '#c46b5c', at: (m) => m.unemployment * 100, fmt: (v) => `${v.toFixed(1)}%` },
+    ];
+
+    const first = h[0], last = h[h.length - 1];
+    document.getElementById('modal-title').textContent = 'City history';
+    document.getElementById('modal-body').innerHTML = `
+      <div class="subhead">${MONTHS[first.month]} ${first.year} – ${MONTHS[last.month]} ${last.year}
+        · ${h.length} month${h.length === 1 ? '' : 's'}</div>
+      ${series.map((s) => this.chart(h, s)).join('')}
+    `;
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  /** One series as an SVG path, with its range labelled. */
+  chart(history, series) {
+    const W = 330, H = 64, PAD = 3;
+    const values = history.map(series.at);
+    let lo = Math.min(...values), hi = Math.max(...values);
+    if (hi - lo < 1e-6) { hi = lo + 1; }                 // a flat line still needs a box
+    const span = hi - lo;
+
+    const step = values.length > 1 ? (W - PAD * 2) / (values.length - 1) : 0;
+    const points = values.map((v, k) => {
+      const x = PAD + k * step;
+      const y = PAD + (1 - (v - lo) / span) * (H - PAD * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    // Filled under the line, which reads better than a bare stroke at this size.
+    const area = `M${points[0]} L${points.join(' L')} L${(PAD + (values.length - 1) * step).toFixed(1)},${H - PAD} L${PAD},${H - PAD} Z`;
+
+    return `
+      <div class="chart">
+        <div class="chart-head">
+          <span class="k">${series.label}</span>
+          <span class="v">${series.fmt(values[values.length - 1])}</span>
+        </div>
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${series.label} over time">
+          <path d="${area}" fill="${series.color}" fill-opacity="0.18"/>
+          <path d="M${points.join(' L')}" fill="none" stroke="${series.color}" stroke-width="1.5"/>
+        </svg>
+        <div class="chart-foot"><span>${series.fmt(lo)}</span><span>${series.fmt(hi)}</span></div>
+      </div>`;
+  }
 
   showBudget() {
     const w = this.game.world;

@@ -51,6 +51,15 @@ export const ROOF_MATERIALS = [
   { key: 'gravel', tint: '#8a8375', mix: 0.4 },
 ];
 
+/**
+ * A window with the light on.
+ *
+ * Not a lightened version of the glass: under the blue wash of night a
+ * brighter grey stays grey, and the whole point of nightfall in a city builder
+ * is to see which windows are lit. A warm lamp colour reads through it.
+ */
+export const WINDOW_LIT = '#ffd79a';
+
 /** Tint a palette's roof colour towards a material. */
 export function roofColor(base, material) {
   const m = ROOF_MATERIALS[material % ROOF_MATERIALS.length];

@@ -378,6 +378,7 @@ class Game {
         case 'KeyB': this.tools.select(TOOL.BULLDOZE); this.ui.setActiveTool(TOOL.BULLDOZE); break;
         case 'KeyG': this.renderer.showGrid = !this.renderer.showGrid; this.renderer.markDirty(); break;
         case 'KeyV': this.ui.toggleVehicles(); break;
+        case 'KeyN': this.ui.toggleNight(); break;
         default: break;
       }
       const pan = 60 / this.camera.zoom;

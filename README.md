@@ -8,7 +8,7 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
-Current version **0.12.0**, shown in the title bar. `VERSION` in
+Current version **0.13.0**, shown in the title bar. `VERSION` in
 `src/config.js` is the single source of truth — `package.json` carries the same
 number for tooling and a test asserts the two agree. Minor versions track
 feature releases; saves record the version that wrote them, though
@@ -45,11 +45,14 @@ much to maintain, which makes *where* you put them a real decision.
 | `B` | Bulldoze |
 | `G` | Toggle the tile grid |
 | `V` | Show or hide the traffic |
+| `N` | Run through night and day, or stay in daylight |
 | `Esc` | Cancel the current drag |
 
 The **Data view** dropdown overlays land value, pollution, crime, traffic, the
 power grid, and each service's coverage. **Cars** turns the moving traffic on
-and off.
+and off, **Night** the day cycle, and **History** shows what the city has been
+doing month by month — population, treasury, approval, land value and
+unemployment, drawn from snapshots the city has been recording since 1900.
 
 When a new version has been deployed, a banner says so and offers a reload;
 taking it writes the city out first, so nothing laid since the last autosave is
@@ -186,6 +189,16 @@ valuable centre keeps building upwards while the suburbs around it stay put —
 but slowly, because redevelopment adds the capacity that satisfies the demand
 that permits it, and a lagged loop at full gain oscillates.
 
+**Power carries across a short gap** rather than only to a touching tile.
+Roads do not conduct, so at strict adjacency a grid city was cut into one
+island per block: measured on an ordinary map, 218 separate networks, 6% of
+lots powered, and a supply seventeen times the demand it could not reach. The
+player's only remedy was to drag a line down every street. A short reach means
+a line along a road serves the blocks either side of it, while anything
+further off — across water, over open country, out to a plant on the edge of
+town — still has to be wired. The same map now runs one network, fully served,
+with about nineteen times the population.
+
 **Grids shed load rather than failing.** A network used to be energised or not,
 so one percent short blacked out everything on it; since losing power empties a
 lot at once, an entire city would collapse, crash its own demand, come back and
@@ -292,6 +305,49 @@ All building art is drawn procedurally as isometric volumes at load time and
 cached, so there are no image assets in the repository. The cache key is zone
 type x level x variant x wealth x era x lit — over ten thousand combinations —
 so it is held in a bounded LRU rather than a plain map.
+
+## Drawing a city thirty times a second
+
+A city is static between simulation ticks; the traffic is not. Repainting
+several thousand tiles to move a few hundred cars was most of the frame budget,
+and unlocking the towers made it worse — a level-four sprite is about 130px
+tall against 20 — taking a built-out map from 102ms a repaint to 174ms.
+
+The city is drawn into two cached offscreen layers: everything the traffic
+drives over, and everything it drives behind. They are re-blitted each frame
+with the cars drawn between them, which is what keeps the cars *in* the city
+rather than on top of it; within each layer the diagonal sweep still decides
+what covers what. Measured on a built-out map with 400 cars on screen:
+
+| zoom | rebuild | cached frame |
+|---|---|---|
+| 0.5 | 187ms | 0.7ms |
+| 1.0 | 103ms | 0.8ms |
+| 2.0 | 90ms | 0.5ms |
+
+Rebuilds are driven by a revision counter the world bumps when something that
+is *drawn* changes — a lot growing, wealth shifting, traffic re-tinting the
+roads, the lights going on or off — rather than by the tick, since most ticks
+change nothing visible. The cursor and the traffic sit outside the cache, so
+moving the mouse no longer repaints a city either.
+
+**Night** rides on the same split. The light level fades continuously over the
+finished frame, while whether the windows are *lit* is a step that the sprite
+cache keys off — so the city is redrawn twice a cycle rather than every frame.
+Lit windows are a warm lamp colour rather than paler glass, because under the
+blue wash of night a brighter grey is still grey.
+
+**Lots share buildings.** Every zoned lot used to be its own one-tile building,
+so a dense district came out as a grid of separate boxes — the largest single
+reason a built-up area read as tiling rather than as a city. Lots that match
+their neighbours exactly — same use, level, budget, period, and all lit or all
+dark — now share one building across a 2x2 block. Merging is decided on a fixed
+parity grid rather than by searching for groups: a search has to break ties, and
+a tie broken differently between frames makes buildings jump between footprints
+as a district grows. Measured on a city zoned the way the tools zone, 61% of
+fully developed blocks qualify, which leaves a mix of large and small rather
+than a uniform upgrade. It is purely a matter of drawing — population, jobs and
+power stay per lot, so nothing about it is saved or simulated.
 
 ## Layout
 

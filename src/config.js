@@ -9,7 +9,7 @@
  * Minor versions track feature releases (bridges, wealth tiers, eras, relief);
  * the patch digit is for fixes and tuning.
  */
-export const VERSION = '0.12.0';
+export const VERSION = '0.13.0';
 
 /**
  * Central tuning constants.
@@ -46,6 +46,17 @@ export const SPEED_TICK_MS = [Infinity, 420, 150, 45];
  * not look like a still life -- but nowhere near the full ratio, which would be
  * a blur.
  */
+/**
+ * Ticks in one day/night cycle.
+ *
+ * Paced for watching rather than for the calendar: at normal speed this is
+ * about half a minute of real time, where a cycle tied honestly to the
+ * month counter would be either a strobe or a slideshow. Cities have always
+ * lied about this -- the point of nightfall in a city builder is to show you
+ * the city you built with its lights on.
+ */
+export const DAY_TICKS = 240;
+
 export const VEHICLE_FRAME_MS = 1000 / 30;
 export const VEHICLE_RATE = [0, 0.85, 1, 1.4];
 
@@ -132,6 +143,21 @@ export const ROAD_INFO = {
   [ROAD.STREET]: { name: 'Street', cost: 18, upkeep: 0.7, capacity: 220 },
   [ROAD.AVENUE]: { name: 'Avenue', cost: 55, upkeep: 2.1, capacity: 700 },
 };
+
+/**
+ * How far power carries between conductive tiles, in tiles.
+ *
+ * At one -- strict orthogonal adjacency -- a road grid cut a city into
+ * islands, because roads do not conduct and every block was bounded by them.
+ * Measured on an ordinary grid-zoned city: 218 separate networks, 6% of lots
+ * powered, and a supply seventeen times the demand it could not reach. The
+ * player's only remedy was to drag a line down every street.
+ *
+ * At two, a line along a road serves the blocks either side of it and adjacent
+ * blocks join up, while lines still have to be run to reach anything further
+ * off -- across water, over open country, out to a plant on the edge of town.
+ */
+export const POWER_REACH = 2;
 
 export const POWERLINE_COST = 8;
 export const POWERLINE_UPKEEP = 0.4;

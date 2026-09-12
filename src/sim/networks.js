@@ -12,7 +12,7 @@
  * they run over every tile on the map several times a second.
  */
 
-import { ROAD_REACH, BUILDINGS, BUILDING_POWER, ZONE_INFO, Z, T, SEA_LEVEL, BRIDGE_CLEARANCE } from '../config.js';
+import { ROAD_REACH, POWER_REACH, BUILDINGS, BUILDING_POWER, ZONE_INFO, Z, T, SEA_LEVEL, BRIDGE_CLEARANCE } from '../config.js';
 
 /**
  * Flood outwards from every road tile and mark tiles within ROAD_REACH.
@@ -236,22 +236,29 @@ export function updatePower(world) {
     stack[sp++] = start;
     world.netId[start] = id;
 
+    // Power carries across a short gap rather than only to a touching tile, so
+    // the road that divides two blocks no longer divides the grid.
     while (sp > 0) {
       const i = stack[--sp];
       net.tiles.push(i);
       const x = i % s, y = (i / s) | 0;
-      let j;
-      if (x > 0) { j = i - 1; if (world.netId[j] === -1 && conducts(world, j)) { world.netId[j] = id; stack[sp++] = j; } }
-      if (x < s - 1) { j = i + 1; if (world.netId[j] === -1 && conducts(world, j)) { world.netId[j] = id; stack[sp++] = j; } }
-      if (y > 0) { j = i - s; if (world.netId[j] === -1 && conducts(world, j)) { world.netId[j] = id; stack[sp++] = j; } }
-      if (y < s - 1) { j = i + s; if (world.netId[j] === -1 && conducts(world, j)) { world.netId[j] = id; stack[sp++] = j; } }
+      const x0 = Math.max(0, x - POWER_REACH), x1 = Math.min(s - 1, x + POWER_REACH);
+      const y0 = Math.max(0, y - POWER_REACH), y1 = Math.min(s - 1, y + POWER_REACH);
+      for (let ny = y0; ny <= y1; ny++) {
+        for (let nx = x0; nx <= x1; nx++) {
+          const j = ny * s + nx;
+          if (world.netId[j] !== -1 || !conducts(world, j)) continue;
+          world.netId[j] = id;
+          stack[sp++] = j;
+        }
+      }
     }
   }
 
   // Tally supply and demand per network. A multi-tile building must only be
   // counted once, no matter how many of its tiles the flood fill visited.
   const seen = new Set();
-  let totalSupply = 0, totalDemand = 0, unservedDemand = 0;
+  let totalSupply = 0, totalDemand = 0, unservedDemand = 0, dead = 0;
 
   for (const net of nets) {
     for (const i of net.tiles) {
@@ -274,6 +281,7 @@ export function updatePower(world) {
     // A network needs an actual generator on it. Without this check, a run of
     // power line with no plant attached would satisfy `supply >= demand` at
     // 0 >= 0 and silently energise everything hanging off it.
+    if (net.supply === 0 && net.demand > 0) dead++;
     net.energised = net.supply > 0 && net.supply >= net.demand;
     if (net.energised) {
       for (const i of net.tiles) world.powered[i] = 1;
@@ -303,6 +311,9 @@ export function updatePower(world) {
   // citywide blackout, because downstream systems (demand, approval) scale
   // their response by this figure.
   world.stats.unservedDemand = unservedDemand;
+  // Districts wired to nothing at all, which is a different problem from a
+  // grid that is merely short and wants naming as one.
+  world.stats.deadNetworks = dead;
   world.stats.brownoutShare = totalDemand > 0 ? unservedDemand / totalDemand : 0;
   world.stats.brownout = world.stats.brownoutShare > 0.05;
 }

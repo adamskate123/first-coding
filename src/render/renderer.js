@@ -10,7 +10,7 @@
  * there is no reason to burn a frame re-painting an unchanged skyline.
  */
 
-import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, ROAD_INFO, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE } from '../config.js';
+import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, ROAD_INFO, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE, DAY_TICKS } from '../config.js';
 import { tileToWorld, tileQuad, flatQuad, quadPoint } from '../iso.js';
 import { TERRAIN, ROAD_COLORS, ZONE_TINT, ZONE_EDGE, ZONE_GROUND, SKY, LOT, VEHICLE_TONES, heatColor, shade, mix } from './palette.js';
 import { zoneSprite, buildingSprite, treeSprite, VARIANTS } from './sprites.js';
@@ -52,6 +52,55 @@ export function quadInset(q, scale) {
 /** A clock that works in a browser and in a bare node test alike. */
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
+/**
+ * Whether this lot is part of a larger building, and where that building sits.
+ *
+ * Every zoned lot used to be its own one-tile building, so a dense district
+ * came out as a grid of separate boxes on a five-tile pitch -- the single
+ * biggest reason a built-up area read as tiling rather than as a city. Lots
+ * that match their neighbours closely enough now share one building across
+ * them.
+ *
+ * Merging is decided on a fixed parity grid rather than by searching for
+ * groups. That matters more than it looks: a search would have to break ties,
+ * and any tie broken differently from one frame to the next makes buildings
+ * jump between footprints as a district grows. On a fixed grid a block either
+ * qualifies or it does not, every lot belongs to exactly one, and the answer
+ * never depends on the order anything was examined.
+ *
+ * Purely a matter of drawing: population, jobs and power are per lot as they
+ * always were, so nothing here is saved or simulated.
+ */
+export const MERGE_SPAN = 2;
+
+export function mergedBlock(world, x, y) {
+  const ox = x - (x % MERGE_SPAN), oy = y - (y % MERGE_SPAN);
+  if (!world.inBounds(ox + MERGE_SPAN - 1, oy + MERGE_SPAN - 1)) return null;
+
+  const a = world.idx(ox, oy);
+  const zone = world.zone[a];
+  const level = world.level[a];
+  // Below level 2 the lots are houses, and a terrace of four identical houses
+  // welded into one block looks less like a city, not more.
+  if (zone === Z.NONE || level < 2) return null;
+
+  const wealth = world.wealth[a];
+  const era = world.eraOf(a);
+  const powered = world.powered[a];
+
+  for (let dy = 0; dy < MERGE_SPAN; dy++) {
+    for (let dx = 0; dx < MERGE_SPAN; dx++) {
+      const i = world.idx(ox + dx, oy + dy);
+      if (world.zone[i] !== zone || world.level[i] !== level) return null;
+      if (world.wealth[i] !== wealth || world.eraOf(i) !== era) return null;
+      if (world.powered[i] !== powered) return null;
+      if (world.road[i] || world.build[i] !== -1) return null;
+      if (world.terrain[i] === T.WATER) return null;
+    }
+  }
+  return { ox, oy, span: MERGE_SPAN, zone, level, wealth, era, powered };
+}
+
 /** Largest building footprint in the catalogue, used to size the draw margin. */
 const MAX_SPAN = Math.max(...Object.values(BUILDINGS).map((b) => b.span));
 
@@ -75,6 +124,7 @@ export class Renderer {
     this.dirty = true;
     this.showGrid = false;
     this.showVehicles = true;
+    this.showNight = true;
     this.vehicles = null;      // a VehicleField, once the game has one
     this.renderCost = 0;       // rolling cost of a full repaint, in ms
     this.layers = null;        // { ground, structures } offscreen canvases
@@ -83,6 +133,25 @@ export class Renderer {
   }
 
   markDirty() { this.dirty = true; }
+
+  /**
+   * How far into the dark it is: 0 in daylight, 1 at the deepest point.
+   *
+   * A smooth curve so dusk and dawn are gradual, but the *lit* state of the
+   * windows is a step -- see `windowsLit`. Only the step goes in the cache
+   * key, so the light fades continuously while the city is only redrawn twice
+   * a cycle.
+   */
+  nightAmount() {
+    if (!this.showNight) return 0;
+    const t = ((this.world.tick % DAY_TICKS) + DAY_TICKS) % DAY_TICKS / DAY_TICKS;
+    // Flat daylight for the first half, then down into night and back.
+    const k = Math.cos(t * Math.PI * 2);
+    return clamp((0.35 - k) / 1.1, 0, 1);
+  }
+
+  /** Whether the windows are on, which is what the sprite cache keys off. */
+  windowsLit() { return this.nightAmount() > 0.35; }
 
   /**
    * What the cached layers were drawn for.
@@ -94,7 +163,8 @@ export class Renderer {
   currentKey() {
     const cam = this.camera;
     return `${cam.x}|${cam.y}|${cam.zoom}|${this.canvas.width}|${this.canvas.height}`
-      + `|${this.overlay}|${this.showGrid ? 1 : 0}|${this.world.revision}|${this.world.size}`;
+      + `|${this.overlay}|${this.showGrid ? 1 : 0}|${this.world.revision}|${this.world.size}`
+      + `|${this.windowsLit() ? 1 : 0}`;
   }
 
   render() {
@@ -210,6 +280,15 @@ export class Renderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(this.layers.structures, 0, 0);
 
+    // Night goes over everything, at its exact strength, so the light can fade
+    // continuously without the city underneath being redrawn.
+    const dark = this.nightAmount();
+    if (dark > 0.01) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = `rgba(12, 22, 52, ${(dark * 0.52).toFixed(3)})`;
+      ctx.fillRect(0, 0, width, height);
+    }
+
     ctx.setTransform(cam.zoom, 0, 0, cam.zoom, width / 2 - cam.x * cam.zoom, height / 2 - cam.y * cam.zoom);
     this.drawCursor();
   }
@@ -301,13 +380,30 @@ export class Renderer {
       // ground tiles paint over its walls, leaving a roof floating on grass.
       if (x === anchorX(b) && y === anchorY(b)) {
         const origin = tileToWorld(b.x, b.y, this.footprintHeight(b));
-        const sp = buildingSprite(b.type, b.powered);
+        const sp = buildingSprite(b.type, b.powered && this.windowsLit());
         ctx.drawImage(sp.canvas, origin.x + sp.ox, origin.y + sp.oy);
       }
     } else if (zone !== Z.NONE && w.level[i] > 0) {
       const info = ZONE_INFO[zone];
+      const block = mergedBlock(w, x, y);
+
+      if (block) {
+        // Drawn once, on the corner of the block nearest the viewer, for the
+        // same reason a service building is: the ground under the whole
+        // footprint has to be down first.
+        if (x !== block.ox + block.span - 1 || y !== block.oy + block.span - 1) return;
+        const lit = block.powered === 1 && this.windowsLit();
+        const variant = hash2(block.ox, block.oy, 11) % VARIANTS;
+        const sp = zoneSprite(info.key, block.level, variant, block.wealth, block.era, lit, block.span);
+        const origin = tileToWorld(block.ox, block.oy, this.blockHeight(block));
+        ctx.drawImage(sp.canvas, origin.x + sp.ox, origin.y + sp.oy);
+        if (block.powered !== 1) this.drawNoPowerMark(p);
+        return;
+      }
+
       const variant = hash2(x, y, 11) % VARIANTS;
-      const sp = zoneSprite(info.key, w.level[i], variant, w.wealth[i], w.eraOf(i), w.powered[i] === 1);
+      const lit = w.powered[i] === 1 && this.windowsLit();
+      const sp = zoneSprite(info.key, w.level[i], variant, w.wealth[i], w.eraOf(i), lit);
       ctx.drawImage(sp.canvas, p.x + sp.ox, p.y + sp.oy);
 
       if (w.powered[i] !== 1) this.drawNoPowerMark(p);
@@ -633,6 +729,16 @@ export class Renderer {
    * ground the far corner would otherwise float or sink. Averaging across the
    * footprint splits the difference.
    */
+  /** The ground a merged block stands on: the mean of the lots under it. */
+  blockHeight(block) {
+    const w = this.world;
+    let sum = 0;
+    for (let dy = 0; dy < block.span; dy++) {
+      for (let dx = 0; dx < block.span; dx++) sum += w.tileHeight(block.ox + dx, block.oy + dy);
+    }
+    return sum / (block.span * block.span);
+  }
+
   footprintHeight(b) {
     const w = this.world;
     let sum = 0, count = 0;

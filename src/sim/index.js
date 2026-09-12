@@ -83,7 +83,10 @@ export class Simulation {
     if (w.funds < 0) {
       this.notify('Treasury is overdrawn. Raise taxes or cut services.', 'bad');
     }
-    if (w.stats.brownout) {
+    if (w.stats.deadNetworks > 0) {
+      const n = w.stats.deadNetworks;
+      this.notify(`${n} district${n === 1 ? ' is' : 's are'} wired to no power plant.`, 'bad');
+    } else if (w.stats.brownout) {
       this.notify('Parts of the grid are browning out.', 'bad');
     }
     if (w.stats.unemployment > 0.25 && w.stats.population > 200) {

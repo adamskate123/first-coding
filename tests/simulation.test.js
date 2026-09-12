@@ -115,16 +115,28 @@ test('power does not jump between unconnected networks', () => {
   assert.notEqual(w.netId[w.idx(2, 8)], w.netId[w.idx(20, 20)]);
 });
 
-test('a single missing tile of line breaks the connection', () => {
-  const w = flatWorld();
-  w.placeBuilding('coal', 2, 2);
-  w.powerLine[w.idx(2, 6)] = 1;      // note the gap at row 5
-  w.powerLine[w.idx(2, 7)] = 1;
-  w.zone[w.idx(2, 8)] = Z.R_LOW;
-  w.level[w.idx(2, 8)] = 1;
+test('power carries across a short gap, but not across open country', () => {
+  // This used to require an unbroken line of tiles, which read as strict but
+  // played as a chore: roads do not conduct, so a grid city was cut into one
+  // island per block -- 218 separate networks on an ordinary map, 6% of lots
+  // powered, and a supply seventeen times the demand it could not reach. A
+  // short reach means a line down a street serves the blocks either side of
+  // it; anything further off still has to be wired.
+  const near = flatWorld();
+  near.placeBuilding('coal', 2, 2);
+  near.powerLine[near.idx(2, 6)] = 1;      // note the gap at row 5
+  near.powerLine[near.idx(2, 7)] = 1;
+  near.zone[near.idx(2, 8)] = Z.R_LOW;
+  near.level[near.idx(2, 8)] = 1;
+  updatePower(near);
+  assert.equal(near.powered[near.idx(2, 8)], 1, 'a one-tile gap should be bridged');
 
-  updatePower(w);
-  assert.equal(w.powered[w.idx(2, 8)], 0, 'power does not jump the gap');
+  const far = flatWorld();
+  far.placeBuilding('coal', 2, 2);
+  far.zone[far.idx(2, 14)] = Z.R_LOW;       // well out of reach of the plant
+  far.level[far.idx(2, 14)] = 1;
+  updatePower(far);
+  assert.equal(far.powered[far.idx(2, 14)], 0, 'power should not cross open country unwired');
 });
 
 test('a network browns out when demand exceeds its own supply', () => {
@@ -143,7 +155,20 @@ test('a network browns out when demand exceeds its own supply', () => {
 
   assert.ok(w.stats.powerDemand > w.stats.powerSupply);
   assert.equal(w.stats.brownout, true);
-  assert.equal(w.powered[w.idx(10, 10)], 0, 'an overloaded network carries nobody');
+
+  // An overloaded network sheds load rather than dropping it all: it used to
+  // be all or nothing, so a grid one percent short blacked out every lot on
+  // it and the city emptied itself.
+  let lots = 0, lit = 0;
+  for (let i = 0; i < w.zone.length; i++) {
+    if (!w.zone[i] || !w.level[i]) continue;
+    lots++;
+    if (w.powered[i]) lit++;
+  }
+  assert.ok(lit > 0, 'a short network should still carry what it can');
+  assert.ok(lit < lots, 'and should leave the rest dark');
+  assert.ok(w.stats.brownoutShare > 0.5,
+    `most of this demand should go unserved, got ${w.stats.brownoutShare.toFixed(2)}`);
 });
 
 test('a power plant on its own network reports supply but no brownout', () => {
