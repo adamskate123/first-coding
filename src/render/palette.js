@@ -23,10 +23,17 @@ export const TERRAIN = {
 export const FACE = { top: 1.0, left: 0.82, right: 0.62 };
 
 export const ROAD_COLORS = {
-  street: '#6e6b64',
+  street: '#726f68',
   streetEdge: '#5c5952',
-  avenue: '#66635c',
+  // Darker, newer-looking tarmac, so an avenue reads as the bigger road even
+  // before its markings are legible.
+  avenue: '#5b5852',
   markings: '#c9c2a8',
+  // A divided carriageway's median: kerbed, and planted where there is room.
+  median: '#9d9787',
+  medianEdge: '#7d7868',
+  planting: '#5f7f45',
+  kerb: '#8e8a7e',
   // Where the tarmac heads as a road jams up.
   congested: '#9c4a38',
 };

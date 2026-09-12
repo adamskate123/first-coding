@@ -22,7 +22,7 @@ import { TILE_W, TILE_H } from '../config.js';
 import { FACE, WINDOW_LIT, shade, mix } from './palette.js';
 import {
   isoSlab, isoBox, isoCylinder, cylinderBands, rhombusUV, poly,
-  groundShadowUV, gableRoofUV, drawTreeAt,
+  groundShadowUV, gableRoofUV, drawTreeAt, faces, panel,
 } from './volumes.js';
 import { hash2 } from '../util.js';
 
@@ -42,33 +42,6 @@ export const CIVIC_HEADROOM = {
 
 /** Screen position of the tile-space point (u, v) within a footprint. */
 const at = (ox, oy, u, v) => ({ x: ox + (u - v) * (TILE_W / 2), y: oy + (u + v) * (TILE_H / 2) });
-
-/** The two faces of a slab the camera can see, with the axis each runs along. */
-function faces(box) {
-  return [
-    { anchor: box.left, dir: { x: box.uw, y: box.uh }, tint: FACE.left, len: Math.hypot(box.uw, box.uh) },
-    { anchor: box.bottom, dir: { x: box.vw, y: -box.vh }, tint: FACE.right, len: Math.hypot(box.vw, box.vh) },
-  ];
-}
-
-/**
- * A rectangle lying in the plane of one wall.
- *
- * `f0`/`f1` run 0..1 along the face and `v0`/`v1` are heights in pixels above
- * its foot, so a door or a sign can be placed without the caller doing any
- * projection of its own.
- */
-function panel(ctx, face, f0, f1, v0, v1, fill) {
-  const { anchor, dir } = face;
-  ctx.fillStyle = fill;
-  ctx.beginPath();
-  ctx.moveTo(anchor.x + dir.x * f0, anchor.y + dir.y * f0 - v0);
-  ctx.lineTo(anchor.x + dir.x * f1, anchor.y + dir.y * f1 - v0);
-  ctx.lineTo(anchor.x + dir.x * f1, anchor.y + dir.y * f1 - v1);
-  ctx.lineTo(anchor.x + dir.x * f0, anchor.y + dir.y * f0 - v1);
-  ctx.closePath();
-  ctx.fill();
-}
 
 /**
  * Regular civic fenestration.

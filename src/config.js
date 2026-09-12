@@ -49,13 +49,17 @@ export const SPEED_TICK_MS = [Infinity, 420, 150, 45];
 /**
  * Ticks in one day/night cycle.
  *
- * Paced for watching rather than for the calendar: at normal speed this is
- * about half a minute of real time, where a cycle tied honestly to the
- * month counter would be either a strobe or a slideshow. Cities have always
- * lied about this -- the point of nightfall in a city builder is to show you
- * the city you built with its lights on.
+ * Paced for watching rather than for the calendar: a cycle tied honestly to
+ * the month counter would be either a strobe or a slideshow. Cities have
+ * always lied about this -- the point of nightfall in a city builder is to
+ * show you the city you built with its lights on.
+ *
+ * At 240 it was a strobe: thirty-six seconds of real time at normal speed, so
+ * the city never settled into either state long enough to be looked at, and
+ * fast-forwarding made it flicker. Three minutes at normal speed gives
+ * nightfall time to be an event rather than a flash.
  */
-export const DAY_TICKS = 240;
+export const DAY_TICKS = 1200;
 
 export const VEHICLE_FRAME_MS = 1000 / 30;
 export const VEHICLE_RATE = [0, 0.85, 1, 1.4];
