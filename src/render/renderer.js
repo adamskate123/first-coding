@@ -183,16 +183,28 @@ export class Renderer {
     this.renderCost = this.renderCost * 0.8 + (now() - started) * 0.2;
   }
 
-  /** An offscreen canvas the size of the view, cleared and ready. */
+  /**
+   * An offscreen canvas the size of the view, cleared and ready.
+   *
+   * The transform is reset *before* the clear, and that is the whole point of
+   * doing it here rather than at the call site. A context keeps its transform
+   * between frames, so a layer still carrying the previous camera cleared a
+   * camera-space rectangle instead of the canvas -- which, when the camera had
+   * moved, left a band of the previous frame's skyline standing at the edge of
+   * the view. It showed up as buildings smearing down the side of the screen
+   * while scrolling, and only while scrolling: a still camera never rebuilds.
+   */
   surface(existing) {
     const { width, height } = this.canvas;
-    if (existing && existing.width === width && existing.height === height) {
-      existing.getContext('2d').clearRect(0, 0, width, height);
-      return existing;
-    }
-    return typeof OffscreenCanvas !== 'undefined'
-      ? new OffscreenCanvas(width, height)
-      : Object.assign(document.createElement('canvas'), { width, height });
+    const canvas = existing && existing.width === width && existing.height === height
+      ? existing
+      : (typeof OffscreenCanvas !== 'undefined'
+        ? new OffscreenCanvas(width, height)
+        : Object.assign(document.createElement('canvas'), { width, height }));
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    return canvas;
   }
 
   /**

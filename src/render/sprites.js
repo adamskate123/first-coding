@@ -27,8 +27,22 @@ import { TILE_W, TILE_H, BUILDINGS, ERAS } from '../config.js';
 import { buildingPalette, applyEra, roofColor, TREE_COLORS, FACE, WINDOW_LIT, shade, mix } from './palette.js';
 import { facadeStyle, facadePlan, EL } from './facade.js';
 import { hash2, makeRng, clamp, createLruCache } from '../util.js';
+import {
+  makeCanvas, isoOffset, isoBox, groundShadow, drawTreeAt,
+  hipRoof, gableRoof, flatRoofDetail, chimney, awning,
+} from './volumes.js';
+import { civicSprite, CIVIC_HEADROOM } from './civic.js';
 
 const PAD = 10;
+
+/**
+ * Extra room around a civic sprite, for the shadow it drops beyond its own
+ * plot. The shadow is cast down and to the right and lengthens with height, so
+ * a power station on a three-tile plot reaches well past the tile it stands
+ * on. The sprite's anchor moves with the margin, so nothing is displaced --
+ * only the canvas is bigger.
+ */
+const FOOT = 22, SIDE = 30;
 
 /**
  * Sprite cache, bounded.
@@ -254,149 +268,6 @@ function roofMaterialFor(pitched, tier, era, rng) {
   return r < 0.45 ? 3 : r < 0.75 ? 6 : 2;                     // tar, gravel, lead
 }
 
-function makeCanvas(w, h) {
-  return typeof OffscreenCanvas !== 'undefined'
-    ? new OffscreenCanvas(w, h)
-    : Object.assign(document.createElement('canvas'), { width: w, height: h });
-}
-
-// ------------------------------------------------------------- primitives --
-
-/** Offset in screen pixels for a displacement of (u, v) tiles. */
-function isoOffset(u, v) {
-  return { x: (u - v) * (TILE_W / 2), y: (u + v) * (TILE_H / 2) };
-}
-
-/** Trace the rhombus of a span-N footprint, lifted by `lift` pixels. */
-function rhombus(ctx, ox, oy, span, lift = 0) {
-  const w2 = (span * TILE_W) / 2;
-  const h2 = (span * TILE_H) / 2;
-  ctx.beginPath();
-  ctx.moveTo(ox, oy - lift);
-  ctx.lineTo(ox + w2, oy + h2 - lift);
-  ctx.lineTo(ox, oy + h2 * 2 - lift);
-  ctx.lineTo(ox - w2, oy + h2 - lift);
-  ctx.closePath();
-}
-
-/** Trace a polygon. */
-function poly(ctx, pts) {
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
-  ctx.closePath();
-}
-
-/**
- * Ambient occlusion, faked.
- *
- * Real pre-rendered isometric sprites carry baked soft shadowing, and its
- * absence is most of why flat-filled volumes look like they are hovering. Two
- * cheap approximations get most of the way: a gradient darkening the foot of
- * every wall, and a soft contact shadow on the ground. No canvas blur filter is
- * used -- support for it is patchy -- so the shadow is a few nested shapes at
- * low alpha instead.
- */
-const AO_STRENGTH = 0.26;
-const AO_RISE = 0.42;        // fraction of the wall the darkening reaches up
-
-function occludeFace(ctx, pts, baseY, height) {
-  if (height < 4) return;
-  const grad = ctx.createLinearGradient(0, baseY - height * AO_RISE, 0, baseY);
-  grad.addColorStop(0, 'rgba(24, 28, 22, 0)');
-  grad.addColorStop(1, `rgba(24, 28, 22, ${AO_STRENGTH})`);
-  ctx.fillStyle = grad;
-  poly(ctx, pts);
-  ctx.fill();
-}
-
-/**
- * The shadow a building drops on its own plot.
- *
- * Cast down and to the right, away from the light the faces are already shaded
- * for, and lengthened by the building's height -- a tower throwing the same
- * stub of shade as a bungalow is one of those things nobody consciously
- * notices and everybody reads as wrong. Layered at low alpha rather than
- * blurred: canvas filter support is patchy enough not to rely on.
- */
-function groundShadow(ctx, ox, oy, span, height = 0) {
-  const reach = clamp(height * 0.22, 0, 14);
-  for (let k = 3; k >= 1; k--) {
-    const grow = 1 + k * 0.07;
-    const oyAdj = oy + ((span - span * grow) * TILE_H) / 2;
-    ctx.fillStyle = 'rgba(26, 32, 22, 0.075)';
-    rhombus(ctx, ox + 3 + reach, oyAdj + 2 + reach * 0.5, span * grow, 0);
-    ctx.fill();
-  }
-}
-
-/**
- * A solid isometric box: roof slab, front-left face, front-right face.
- * Returns its geometry so callers can decorate the faces.
- */
-function isoBox(ctx, ox, oy, span, height, colors) {
-  const w2 = (span * TILE_W) / 2;
-  const h2 = (span * TILE_H) / 2;
-  const bottom = { x: ox, y: oy + h2 * 2 };
-  const left = { x: ox - w2, y: oy + h2 };
-  const right = { x: ox + w2, y: oy + h2 };
-
-  const leftFace = [
-    left, bottom,
-    { x: bottom.x, y: bottom.y - height },
-    { x: left.x, y: left.y - height },
-  ];
-  ctx.fillStyle = shade(colors.wall, FACE.left);
-  poly(ctx, leftFace);
-  ctx.fill();
-  occludeFace(ctx, leftFace, bottom.y, height);
-
-  const rightFace = [
-    bottom, right,
-    { x: right.x, y: right.y - height },
-    { x: bottom.x, y: bottom.y - height },
-  ];
-  ctx.fillStyle = shade(colors.wall, FACE.right);
-  poly(ctx, rightFace);
-  ctx.fill();
-  occludeFace(ctx, rightFace, bottom.y, height);
-
-  ctx.fillStyle = colors.roof;
-  rhombus(ctx, ox, oy, span, height);
-  ctx.fill();
-
-  if (height >= 3) {
-    // A darker line around the silhouette. Flat-filled volumes of similar
-    // value merge into each other without one, which is most of why a dense
-    // block reads as a single grey mass rather than as separate buildings.
-    ctx.strokeStyle = shade(colors.wall, 0.42);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(left.x, left.y - height);
-    ctx.lineTo(left.x, left.y);
-    ctx.lineTo(bottom.x, bottom.y);
-    ctx.lineTo(right.x, right.y);
-    ctx.lineTo(right.x, right.y - height);
-    ctx.stroke();
-
-    // The vertical corner facing the light catches it.
-    ctx.strokeStyle = shade(colors.wall, 1.28);
-    ctx.beginPath();
-    ctx.moveTo(bottom.x, bottom.y - height);
-    ctx.lineTo(bottom.x, bottom.y);
-    ctx.stroke();
-
-    // ...and so does the roof edge on that side.
-    ctx.beginPath();
-    ctx.moveTo(left.x, left.y - height);
-    ctx.lineTo(ox, oy - height);
-    ctx.lineTo(right.x, right.y - height);
-    ctx.stroke();
-  }
-
-  return { ox, oy, span, bottom, left, right, w2, h2, height };
-}
-
 /**
  * Paint one facade plan onto a face.
  *
@@ -515,197 +386,8 @@ function paintFacade(ctx, anchor, du, plan, colors, lit, seed, faceTint) {
 
 /** Paint both visible faces of a box from one plan. */
 function dressBox(ctx, box, plan, colors, seed, lit) {
-  paintFacade(ctx, box.left, { x: box.w2, y: box.h2 }, plan, colors, lit, seed, FACE.left);
-  paintFacade(ctx, box.bottom, { x: box.w2, y: -box.h2 }, plan, colors, lit, seed + 91, FACE.right);
-}
-
-// ------------------------------------------------------------------ roofs --
-
-/** Hipped roof: four triangles meeting at a central apex. */
-function hipRoof(ctx, ox, oy, span, lift, rise, color) {
-  const w2 = (span * TILE_W) / 2;
-  const h2 = (span * TILE_H) / 2;
-  const top = { x: ox, y: oy - lift };
-  const right = { x: ox + w2, y: oy + h2 - lift };
-  const bottom = { x: ox, y: oy + h2 * 2 - lift };
-  const left = { x: ox - w2, y: oy + h2 - lift };
-  const apex = { x: ox, y: oy + h2 - lift - rise };
-
-  const face = (a, b, tint) => {
-    ctx.fillStyle = shade(color, tint);
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(apex.x, apex.y);
-    ctx.closePath(); ctx.fill();
-  };
-  face(left, top, 0.9);
-  face(top, right, 0.78);
-  face(left, bottom, 1.06);
-  face(bottom, right, 0.7);
-
-  // The hips themselves. Four flat triangles meeting at a point read as a
-  // pyramid of paint; the arrises are what make it read as a roof.
-  ctx.strokeStyle = shade(color, 1.3);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(left.x, left.y); ctx.lineTo(apex.x, apex.y);
-  ctx.moveTo(bottom.x, bottom.y); ctx.lineTo(apex.x, apex.y);
-  ctx.stroke();
-  ctx.strokeStyle = shade(color, 0.6);
-  ctx.beginPath();
-  ctx.moveTo(top.x, top.y); ctx.lineTo(apex.x, apex.y);
-  ctx.moveTo(right.x, right.y); ctx.lineTo(apex.x, apex.y);
-  // and the eaves, where the roof oversails the wall
-  ctx.moveTo(left.x, left.y); ctx.lineTo(bottom.x, bottom.y); ctx.lineTo(right.x, right.y);
-  ctx.stroke();
-}
-
-/** Gabled roof: two slopes meeting at a ridge, with a triangular end wall. */
-function gableRoof(ctx, ox, oy, span, lift, rise, color, wall) {
-  const w2 = (span * TILE_W) / 2;
-  const h2 = (span * TILE_H) / 2;
-  const top = { x: ox, y: oy - lift };
-  const right = { x: ox + w2, y: oy + h2 - lift };
-  const bottom = { x: ox, y: oy + h2 * 2 - lift };
-  const left = { x: ox - w2, y: oy + h2 - lift };
-  // Ridge runs from the midpoint of one pair of edges to the other.
-  const ridgeA = { x: ox - w2 / 2, y: oy + h2 / 2 - lift - rise };
-  const ridgeB = { x: ox + w2 / 2, y: oy + h2 * 1.5 - lift - rise };
-
-  // Gable end walls first; the slopes overlap their upper edges.
-  ctx.fillStyle = shade(wall, 0.86);
-  ctx.beginPath();
-  ctx.moveTo(top.x, top.y); ctx.lineTo(left.x, left.y); ctx.lineTo(ridgeA.x, ridgeA.y);
-  ctx.closePath(); ctx.fill();
-  ctx.fillStyle = shade(wall, 0.64);
-  ctx.beginPath();
-  ctx.moveTo(right.x, right.y); ctx.lineTo(bottom.x, bottom.y); ctx.lineTo(ridgeB.x, ridgeB.y);
-  ctx.closePath(); ctx.fill();
-
-  const plane = (a, b, tint) => {
-    ctx.fillStyle = shade(color, tint);
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-    ctx.lineTo(ridgeB.x, ridgeB.y); ctx.lineTo(ridgeA.x, ridgeA.y);
-    ctx.closePath(); ctx.fill();
-  };
-  plane(top, right, 0.74);     // far slope
-  plane(left, bottom, 1.05);   // near slope, catching the light
-
-  // Ridge and eaves. Without them the two slopes merge into one lozenge.
-  ctx.strokeStyle = shade(color, 1.34);
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.moveTo(ridgeA.x, ridgeA.y); ctx.lineTo(ridgeB.x, ridgeB.y);
-  ctx.stroke();
-  ctx.strokeStyle = shade(color, 0.58);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(left.x, left.y); ctx.lineTo(bottom.x, bottom.y); ctx.lineTo(right.x, right.y);
-  ctx.stroke();
-}
-
-/**
- * Parapet, deck and plant -- what sells a flat roof.
- *
- * This is the surface the camera sees most of, and a bare fill of one colour
- * is why a block of flat-roofed buildings used to read as a grid of tiles
- * rather than as rooftops. A rim, a recessed deck of a different tone, and
- * some plant standing on it are the whole difference.
- */
-function flatRoofDetail(ctx, box, colors, rec) {
-  const { ox, oy, span, height } = box;
-
-  // The parapet rim, then the deck recessed inside it.
-  const deck = span * 0.84;
-  ctx.fillStyle = shade(colors.roof, 1.16);
-  rhombus(ctx, ox, oy, span, height);
-  ctx.fill();
-  ctx.fillStyle = shade(colors.roof, 0.9);
-  rhombus(ctx, ox, oy + ((span - deck) * TILE_H) / 2, deck, height);
-  ctx.fill();
-
-  const w2 = (span * TILE_W) / 2;
-  const h2 = (span * TILE_H) / 2;
-
-  // A stair housing, which every flat roof in the world has.
-  if (span > 0.45) {
-    const sx = ox + w2 * 0.28, sy = oy + h2 - height + h2 * 0.1;
-    isoBox(ctx, sx, sy, span * 0.2, 5 + (rec.seed % 4), {
-      wall: shade(colors.roof, 1.05), roof: shade(colors.roof, 0.72),
-    });
-  }
-
-  // Plant: a huddle of small units, the way real roofs carry air handling.
-  const units = 1 + (rec.seed >> 5) % 3;
-  ctx.fillStyle = shade(colors.roof, 0.66);
-  for (let k = 0; k < units; k++) {
-    const hx = hash2(k, rec.seed, 71) / 4294967296 - 0.5;
-    const hy = hash2(k, rec.seed, 83) / 4294967296 - 0.5;
-    if (Math.abs(hx) + Math.abs(hy) > 0.5) continue;
-    const cx = ox + (hx + hy) * w2 * 0.9;
-    const cy = oy + h2 - height + (hx - hy) * h2 * 0.9;
-    ctx.fillRect(cx - 2, cy - 3, 4, 3);
-  }
-  for (let k = 0; k < rec.tanks; k++) {
-    const hx = hash2(k, rec.seed, 17) / 4294967296;
-    const hy = hash2(k, rec.seed, 29) / 4294967296;
-    const u = (hx - 0.5) * 1.1, v = (hy - 0.5) * 1.1;
-    if (Math.abs(u) + Math.abs(v) > 0.62) continue;
-    const cx = ox + (u + v) * w2;
-    const cy = oy + h2 - height + (u - v) * h2;
-    const bh = 3 + (rec.seed >> (k * 3)) % 6;
-    isoBox(ctx, cx, cy - h2 * 0.18, span * 0.22, bh, { wall: colors.roof, roof: shade(colors.roof, 1.12) });
-  }
-
-  if (rec.antenna) {
-    const mastH = 12 + (rec.seed % 10);
-    const cx = ox, cy = oy + h2 - height;
-    ctx.strokeStyle = '#4d4a44';
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy); ctx.lineTo(cx, cy - mastH);
-    ctx.stroke();
-    ctx.fillStyle = '#c2554a';
-    ctx.fillRect(cx - 1, cy - mastH - 2, 2, 2);
-  }
-}
-
-/**
- * A chimney poking out of a pitched roof.
- *
- * Kept short and brick-coloured on purpose: a tall dark one reads as an
- * industrial smokestack and pulls the eye straight off the houses.
- */
-function chimney(ctx, box, colors, rec) {
-  const { ox, oy, span, height } = box;
-  const h2 = (span * TILE_H) / 2;
-  const side = (rec.seed & 1) ? 0.2 : -0.2;
-  const cx = ox + side * (span * TILE_W) / 2;
-  const cy = oy + h2 - height + side * h2 * 0.5;
-  const stackH = 5 + (rec.seed % 4);
-  isoBox(ctx, cx, cy, span * 0.14, stackH, {
-    wall: shade(colors.roof, 1.12), roof: shade(colors.roof, 0.7),
-  });
-}
-
-/** A shop canopy along the two street-facing edges. */
-function awning(ctx, box, colors) {
-  const { bottom, left, right } = box;
-  const drop = 5;
-  ctx.fillStyle = shade(colors.roof, 1.18);
-  ctx.beginPath();
-  ctx.moveTo(left.x, left.y - drop - 3);
-  ctx.lineTo(bottom.x, bottom.y - drop - 3);
-  ctx.lineTo(bottom.x, bottom.y - drop);
-  ctx.lineTo(left.x, left.y - drop);
-  ctx.closePath(); ctx.fill();
-  ctx.fillStyle = shade(colors.roof, 0.95);
-  ctx.beginPath();
-  ctx.moveTo(bottom.x, bottom.y - drop - 3);
-  ctx.lineTo(right.x, right.y - drop - 3);
-  ctx.lineTo(right.x, right.y - drop);
-  ctx.lineTo(bottom.x, bottom.y - drop);
-  ctx.closePath(); ctx.fill();
+  paintFacade(ctx, box.left, { x: box.uw, y: box.uh }, plan, colors, lit, seed, FACE.left);
+  paintFacade(ctx, box.bottom, { x: box.vw, y: -box.vh }, plan, colors, lit, seed + 91, FACE.right);
 }
 
 // ---------------------------------------------------------------- massing --
@@ -849,6 +531,16 @@ export function zoneSprite(zoneKey, level, variant, wealth, era, lit, span = 1) 
 }
 
 /** Sprite for a placed service building. */
+/**
+ * Sprite for a placed service building.
+ *
+ * The catalogue types are modelled individually in `civic.js` -- a fire
+ * station gets appliance doors and a drill tower, a school gets a long gabled
+ * wing, a power station gets chimneys. `civicSprite` returns false for
+ * anything without a model, and that case still falls back to the generic
+ * box-and-windows treatment, so adding a new catalogue entry never leaves a
+ * hole in the map while its art is being drawn.
+ */
 export function buildingSprite(type, lit) {
   const key = `b:${type}:${lit ? 1 : 0}`;
   const hit = cacheGet(key);
@@ -857,60 +549,30 @@ export function buildingSprite(type, lit) {
   const spec = BUILDINGS[type];
   const span = spec.span;
   const height = spec.height;
-  const totalH = height + span * 14 + 20;
+  const totalH = height + (CIVIC_HEADROOM[type] || 0) + span * 14 + 20;
 
-  const w = span * TILE_W + PAD * 2;
-  const h = span * TILE_H + totalH + PAD * 2;
+  // Room below the footprint as well as above it: the contact shadow is cast
+  // down and to the right and grows with the building, so a tall one on a
+  // large plot throws shade past the bottom corner of its own tile.
+  const w = span * TILE_W + PAD * 2 + SIDE * 2;
+  const h = span * TILE_H + totalH + PAD * 2 + FOOT;
   const canvas = makeCanvas(w, h);
   const ctx = canvas.getContext('2d');
   const ox = w / 2;
   const oy = totalH + PAD;
 
-  if (spec.category === 'park') {
-    drawPark(ctx, ox, oy, span);
-  } else {
+  if (!civicSprite(ctx, type, spec, ox, oy, lit)) {
     groundShadow(ctx, ox, oy + ((span - span * 0.9) * TILE_H) / 2, span * 0.9, height);
     const colors = { wall: spec.color, roof: shade(spec.color, 0.86), win: '#cfe0e6' };
     const box = isoBox(ctx, ox, oy, span * 0.9, height, colors);
-    // Civic buildings get the same grammar, drawn from a seed fixed by type so
-    // every police station in the city is recognisably the same building.
     const rng = makeRng(hash2(type.length * 131, span * 17, 0x0c171c));
     const style = facadeStyle(rng, spec.supply ? 'I' : 'C', 1, 1);
     const plan = facadePlan(style, height, Math.hypot(box.w2, box.h2), spec.supply ? 'I' : 'C', type.length * 37);
     dressBox(ctx, box, plan, colors, 5, lit);
     flatRoofDetail(ctx, box, colors, { tanks: 1 + (span % 2), antenna: false, seed: type.length * 37 + span });
-    if (spec.supply) drawStacks(ctx, ox, oy, span, height, spec);
   }
 
   return cacheSet(key, { canvas, ox: -ox, oy: -oy });
-}
-
-function drawPark(ctx, ox, oy, span) {
-  ctx.fillStyle = '#5c8a3f';
-  rhombus(ctx, ox, oy, span, 0);
-  ctx.fill();
-  ctx.strokeStyle = '#4a7333';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.strokeStyle = '#b6a986';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(ox - span * TILE_W * 0.3, oy + span * TILE_H * 0.5);
-  ctx.lineTo(ox + span * TILE_W * 0.3, oy + span * TILE_H * 0.5);
-  ctx.stroke();
-  drawTreeAt(ctx, ox - span * 8, oy + span * TILE_H * 0.32, 0);
-  drawTreeAt(ctx, ox + span * 7, oy + span * TILE_H * 0.68, 1);
-}
-
-/** Cooling stacks give power plants their unmistakable silhouette. */
-function drawStacks(ctx, ox, oy, span, height, spec) {
-  if (spec.supply <= 0) return;
-  const stackH = spec.pollution > 10 ? 34 : 16;
-  for (const [u, v] of [[-0.22, -0.1], [0.16, 0.14]]) {
-    const cx = ox + (u + v) * (span * TILE_W) / 2;
-    const cy = oy + (span * TILE_H) / 2 - height + (u - v) * (span * TILE_H) / 2;
-    isoBox(ctx, cx, cy, span * 0.2, stackH, { wall: '#9a9188', roof: '#3a352f' });
-  }
 }
 
 /** A single tree, used for terrain scatter and park decoration. */
@@ -926,22 +588,5 @@ export function treeSprite(variant) {
   return cacheSet(key, { canvas, ox: -w / 2, oy: -(h - 6 - TILE_H / 2) });
 }
 
-function drawTreeAt(ctx, x, baseY, variant) {
-  const c = TREE_COLORS[variant % TREE_COLORS.length];
-  ctx.fillStyle = 'rgba(28, 34, 24, 0.18)';
-  ctx.beginPath();
-  ctx.ellipse(x + 3, baseY - 1, 8, 4, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = c.trunk;
-  ctx.fillRect(x - 1, baseY - 7, 2, 7);
-  ctx.fillStyle = c.canopy;
-  ctx.beginPath();
-  ctx.ellipse(x, baseY - 12, 7, 8, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = c.shade;
-  ctx.beginPath();
-  ctx.ellipse(x + 2.2, baseY - 10, 4.4, 5.4, 0, 0, Math.PI * 2);
-  ctx.fill();
-}
 
 export function clearSpriteCache() { cache.clear(); }

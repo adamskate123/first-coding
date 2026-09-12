@@ -15,6 +15,18 @@ import { VERSION } from './config.js';
 
 export const CHANGELOG = [
   {
+    version: '0.15.0',
+    headline: 'Every civic building is its own building now',
+    changes: [
+      'Scrolling no longer smears the city down the side of the screen.',
+      'The fire station has appliance bay doors and a drill tower; the police station a portico, squad cars and a radio mast; the clinic an ambulance canopy and a red cross you can spot from across the map; the school a long gabled wing with a bell cupola and a ball court.',
+      'Power stations look like power stations: banded chimneys and a coal yard under a grab gantry, or gas holders beside the turbine hall.',
+      'The solar farm is rows of tilted panels rather than a blue slab.',
+      'Parks and plazas gained paths, planting, benches, lamps and a fountain.',
+      'At night the bay doors glow, the blue lamps come on, and the chimneys carry warning lights.',
+    ],
+  },
+  {
     version: '0.14.0',
     headline: 'A note on what changed',
     changes: [
