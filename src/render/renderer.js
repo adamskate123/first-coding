@@ -10,7 +10,7 @@
  * there is no reason to burn a frame re-painting an unchanged skyline.
  */
 
-import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, ROAD_INFO, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE, DAY_TICKS } from '../config.js';
+import { TILE_W, TILE_H, ELEV_STEP, T, Z, ZONE_INFO, ROAD, ROAD_INFO, BUILDINGS, SEA_LEVEL, BRIDGE_CLEARANCE, DAY_TICKS, ROAD_REACH } from '../config.js';
 import { tileToWorld, tileQuad, flatQuad, quadPoint } from '../iso.js';
 import { TERRAIN, ROAD_COLORS, ZONE_TINT, ZONE_EDGE, ZONE_GROUND, SKY, LOT, VEHICLE_TONES, heatColor, shade, mix } from './palette.js';
 import { zoneSprite, buildingSprite, siteSprite, treeSprite, VARIANTS } from './sprites.js';
@@ -387,7 +387,12 @@ export class Renderer {
     }
 
     const zone = w.zone[i];
-    if (zone !== Z.NONE && w.level[i] === 0) this.drawZoneTint(x, y, quad, zone, w.roadAccess[i]);
+    // A plot the developers took for a lane keeps its zoning, but it is street
+    // now: marking it as undeveloped land drew the district outline straight
+    // over the road surface.
+    if (zone !== Z.NONE && w.level[i] === 0 && !w.road[i]) {
+      this.drawZoneTint(x, y, quad, zone, w.roadAccess[i]);
+    }
     else if (zone !== Z.NONE && w.build[i] === -1) {
       this.drawLot(x, y, quad, ZONE_INFO[zone].cat, w.wealth[i]);
     }
@@ -1107,7 +1112,23 @@ export class Renderer {
    */
   facing(x, y) {
     const k = this.frontage(x, y);
-    return k === -1 ? 1 : k;
+    if (k !== -1) return k;
+    // No road immediately next door. Rare -- the developers lay lanes until
+    // every plot has one -- but it happens at the ragged edge of a district
+    // while it is still being laid out, and a building with nothing to face
+    // should still turn towards the nearest street rather than all of them
+    // facing the same way by default.
+    const w = this.world;
+    let best = 1, bestD = Infinity;
+    for (let r = 2; r <= ROAD_REACH; r++) {
+      for (let d = 0; d < 4; d++) {
+        const nx = x + DIRS[d][0] * r, ny = y + DIRS[d][1] * r;
+        if (!w.inBounds(nx, ny) || !w.road[w.idx(nx, ny)]) continue;
+        if (r < bestD) { bestD = r; best = d; }
+      }
+      if (bestD < Infinity) break;
+    }
+    return best;
   }
 
   /**
