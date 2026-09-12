@@ -12,6 +12,15 @@ import { World } from './world.js';
 import { SERVICE_KEYS, VERSION } from './config.js';
 
 const SAVE_KEY = 'metropolis.save.v1';
+
+/**
+ * The last version whose release notes this player has seen.
+ *
+ * Kept apart from the save on purpose: it belongs to the player, not to the
+ * city. Importing someone else's city should not make you re-read notes you
+ * have already read, and starting a new city should not reset them.
+ */
+const SEEN_KEY = 'metropolis.seenVersion';
 const FORMAT = 2;
 
 /** Uint8Array -> base64, in chunks so large maps don't blow the call stack. */
@@ -130,4 +139,29 @@ export function hasSave() {
 
 export function clearStorage() {
   localStorage.removeItem(SAVE_KEY);
+}
+
+/**
+ * Which version's release notes this player has read, or null.
+ *
+ * Guarded, like everything else that touches storage: it throws outright in a
+ * private window and can be switched off entirely, and a game that refused to
+ * start because it could not read a release-note marker would be an absurd
+ * trade.
+ */
+export function seenVersion() {
+  try {
+    return localStorage.getItem(SEEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function markVersionSeen(version) {
+  try {
+    localStorage.setItem(SEEN_KEY, version);
+    return true;
+  } catch {
+    return false;
+  }
 }

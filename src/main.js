@@ -7,7 +7,7 @@
  * fast-forwarded one never renders more often than it simulates.
  */
 
-import { MAP_SIZE, SPEED_TICK_MS, AUTOSAVE_INTERVAL_MS, VEHICLE_RATE } from './config.js';
+import { MAP_SIZE, SPEED_TICK_MS, AUTOSAVE_INTERVAL_MS, VEHICLE_RATE, VERSION } from './config.js';
 import { World } from './world.js';
 import { Camera, pickTile } from './iso.js';
 import { Simulation } from './sim/index.js';
@@ -15,8 +15,9 @@ import { VehicleField, vehicleInterval } from './sim/vehicles.js';
 import { Renderer } from './render/renderer.js';
 import { ToolController, TOOL } from './tools.js';
 import { UI } from './ui/index.js';
-import { saveToStorage, loadFromStorage, hasSave, serialize, deserialize } from './save.js';
+import { saveToStorage, loadFromStorage, hasSave, serialize, deserialize, seenVersion, markVersionSeen } from './save.js';
 import { UpdateWatch } from './update.js';
+import { CHANGELOG, entriesSince } from './changelog.js';
 
 class Game {
   constructor(canvas) {
@@ -62,6 +63,7 @@ class Game {
     }
     this.ui.refresh();
     this.updates = new UpdateWatch({ onReady: (v) => this.ui.showUpdate(v) }).start();
+    this.announceRelease(resumed);
     requestAnimationFrame((t) => this.frame(t));
   }
 
@@ -261,6 +263,28 @@ class Game {
     this.lastVehicleAt = now;
     this.vehicles.rate = VEHICLE_RATE[this.speed] ?? 1;
     if (this.vehicles.update(elapsed)) this.renderer.markDirty();
+  }
+
+  /**
+   * Say what changed, once, after an update.
+   *
+   * A returning player who has never seen a release note before still has a
+   * city, and that city records the version that wrote it -- so it stands in
+   * for a marker that did not exist yet, and they get the notes since then
+   * rather than the entire history. Someone arriving for the first time gets
+   * nothing but a quietly recorded marker.
+   */
+  announceRelease(resumed) {
+    const seen = seenVersion() || (resumed ? resumed.world.savedWith : null);
+    const firstRun = !hasSave() && !seenVersion();
+    if (!firstRun) this.ui.showChangelog(entriesSince(seen, CHANGELOG, VERSION), { firstRun });
+    markVersionSeen(VERSION);
+  }
+
+  /** The release notes, on demand, from the version in the title bar. */
+  showReleaseNotes() {
+    const entries = CHANGELOG.filter((e) => e.version === VERSION);
+    this.ui.showChangelog(entries.length ? entries : CHANGELOG.slice(0, 1));
   }
 
   /** Show or hide the traffic, and repaint either way. */

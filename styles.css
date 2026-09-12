@@ -371,6 +371,35 @@ select {
   margin-top: 1px;
 }
 
+/* ---------------------------------------------------------- release notes */
+
+.release { margin: 0 0 14px; }
+.release + .release { border-top: 1px solid var(--edge-dark); padding-top: 12px; }
+.release-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.release-head .k { color: var(--ink); font-size: 12px; font-weight: bold; }
+.release-head .v {
+  color: var(--ink-dim);
+  font-size: 9px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+.release ul { margin: 0; padding-left: 16px; }
+.release li {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+#version { cursor: pointer; }
+#version:hover { color: var(--accent); }
+
 /* ----------------------------------------------------------- update notice */
 
 #update-banner {

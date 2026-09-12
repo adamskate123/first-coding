@@ -260,6 +260,43 @@ async function main() {
   if (quiet.fired || quiet.shown) fail('the update banner fired on the version already running');
   else ok('no banner when the running version is the deployed one');
 
+  // Release notes: shown once after an update, never to a first-time player,
+  // and reachable again from the version in the title bar.
+  const notes = await page.evaluate(async () => {
+    const { VERSION } = await import('/src/config.js');
+    const modal = document.getElementById('modal');
+    const shown = () => !modal.classList.contains('hidden');
+    const versions = () => Array.from(document.querySelectorAll('#modal-body .release-head .v'), (e) => e.textContent);
+
+    window.game.ui.closeModal();
+    // Someone who last saw an old version gets everything since.
+    localStorage.setItem('metropolis.seenVersion', '0.9.0');
+    const { CHANGELOG, entriesSince } = await import('/src/changelog.js');
+    window.game.announceRelease(null);
+    const afterUpgrade = { shown: shown(), versions: versions() };
+    window.game.ui.closeModal();
+
+    // And the same player, now up to date, gets nothing.
+    window.game.announceRelease(null);
+    const upToDate = shown();
+    window.game.ui.closeModal();
+
+    // The title bar brings the current notes back on demand.
+    document.getElementById('version').click();
+    const onDemand = { shown: shown(), versions: versions() };
+    window.game.ui.closeModal();
+
+    return { afterUpgrade, upToDate, onDemand, current: VERSION,
+             total: CHANGELOG.length, since: entriesSince('0.9.0').length };
+  });
+  if (!notes.afterUpgrade.shown) fail('no release notes after an update');
+  else if (notes.afterUpgrade.versions.length !== notes.since) {
+    fail(`release notes listed ${notes.afterUpgrade.versions.length} versions, expected ${notes.since}`);
+  } else if (notes.upToDate) fail('release notes shown again to a player who is up to date');
+  else if (!notes.onDemand.shown || notes.onDemand.versions[0] !== notes.current) {
+    fail(`the version in the title bar did not show the notes for ${notes.current}`);
+  } else ok(`release notes: ${notes.afterUpgrade.versions.length} versions after an upgrade, none when current`);
+
   // Taking the update saves the city first, then reloads onto the new build --
   // so this doubles as the check that a reload resumes what was built.
   await page.evaluate(() => window.game.ui.showUpdate('9.9.9'));
