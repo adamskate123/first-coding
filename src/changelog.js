@@ -15,6 +15,15 @@ import { VERSION } from './config.js';
 
 export const CHANGELOG = [
   {
+    version: '0.20.0',
+    headline: 'Those green lines were hedges, not streets',
+    changes: [
+      'Garden hedges were drawn as a solid dark line along two sides of most plots, and since every plot drew one they joined up into a grid across the whole district that looked like a network of paths. They are clumps of shrubs now, with gaps, on one boundary only.',
+      'Districts that were already built before streets existed now get them. A street could not be cut through a standing house, so an established city never gained a single one however long you left it — the layout only ever appeared on land you zoned fresh. Streets are now cut through built-up land the way real ones were.',
+      'Open ground is always taken first: a house is only pulled down where there is no empty plot left on the line the street has to take, and anything you placed yourself is never touched.',
+    ],
+  },
+  {
     version: '0.19.0',
     headline: 'Streets all the way through a district',
     changes: [

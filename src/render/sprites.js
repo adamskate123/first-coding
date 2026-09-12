@@ -662,17 +662,27 @@ function garden(ctx, ox, oy, span, face, rec, colors) {
   const bu = dx > 0 ? 0.16 : dx < 0 ? 0.84 : 0.5;
   const bv = dy > 0 ? 0.16 : dy < 0 ? 0.84 : 0.5;
 
-  // A hedge or a fence along the boundary the house does not front onto.
-  const line = rng();
-  if (line < 0.7) {
-    const a = P(0.97, 0.06), b = P(0.97, 0.97), c = P(0.06, 0.97);
-    ctx.strokeStyle = line < 0.45 ? LOT.hedge : '#8c7a5e';
-    ctx.lineWidth = line < 0.45 ? 2.4 : 1.4;
-    ctx.beginPath();
-    for (const [p, q] of [[a, b], [b, c]]) {
-      ctx.moveTo(p.x, p.y - 3); ctx.lineTo(q.x, q.y - 3);
+  // Planting along one boundary -- and planting is what it has to look like.
+  // Drawn as a stroked line it came out as a continuous dark-green rule along
+  // two edges of most plots, and since every plot in a district drew one, they
+  // tiled into an unbroken grid that read as a network of paths. A broken run
+  // of shrubs reads as a hedge; a line reads as a street.
+  if (rng() < 0.5) {
+    const back = rng() < 0.5;
+    const a = back ? P(0.95, 0.08) : P(0.08, 0.95);
+    const b = back ? P(0.95, 0.95) : P(0.95, 0.95);
+    const shrubs = 3 + Math.floor(rng() * 3);
+    const skip = Math.floor(rng() * shrubs);       // a gap, as real hedges have
+    for (let k = 0; k < shrubs; k++) {
+      if (k === skip) continue;
+      const f = (k + 0.5) / shrubs;
+      const x = a.x + (b.x - a.x) * f, y = a.y + (b.y - a.y) * f;
+      const r = (2 + rng() * 1.4) * span;
+      ctx.fillStyle = k % 2 ? LOT.hedge : shade(LOT.hedge, 1.18);
+      ctx.beginPath();
+      ctx.ellipse(x, y - 2.4 * span, r, r * 0.72, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
-    ctx.stroke();
   }
 
   // A shed, at the bottom of the garden.

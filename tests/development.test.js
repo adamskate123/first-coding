@@ -142,19 +142,60 @@ test('the lattice is close enough together to serve what lies between', () => {
   assert.ok(LANE_ROW_PITCH <= ROAD_REACH * 2 + 1);
 });
 
-test('a lane is never laid under a standing building', () => {
+test('empty ground is taken before anybody\'s house is', () => {
+  // A lane that can be laid across a field is laid there. Only a district
+  // already built solid, which has no empty ground left on the lattice, pays
+  // for its streets in houses.
   const w = subdivision();
-  // Build out a row that sits squarely on the lattice.
-  let row = -1;
-  for (let y = 4; y < 30 && row < 0; y++) if (onLaneGrid(3, y) && onLaneGrid(4, y)) row = y;
-  assert.ok(row > 0, 'the test needs a lattice row to build on');
-  for (let x = 3; x < 12; x++) w.level[w.idx(x, row)] = 2;
+  const lost = [];
+  const before = Array.from(w.level);
+  develop(w, 4000);
+  for (let i = 0; i < before.length; i++) {
+    if (before[i] > 0 && w.road[i] === ROAD.LANE) lost.push(i);
+  }
+  assert.equal(lost.length, 0, `${lost.length} houses pulled down on open land`);
+});
 
-  develop(w, 1200);
-  for (let x = 3; x < 12; x++) {
-    const i = w.idx(x, row);
-    assert.notEqual(w.road[i], ROAD.LANE, `a lane was cut through the house at ${x},${row}`);
-    assert.equal(w.level[i], 2, 'and the house is still standing');
+test('a district built out before its streets existed still gets them', () => {
+  // The case an existing city is in. Every tile of the lattice has a house on
+  // it, so a network that refuses to path through developed land can never be
+  // laid at all: measured, no lane anywhere and 893 of 896 plots still with no
+  // street after 6,000 ticks. Cutting a street through built-up land is how
+  // real cities got theirs.
+  const w = subdivision();
+  for (let i = 0; i < w.zone.length; i++) {
+    if (w.zone[i] && !w.road[i]) { w.level[i] = 2; w.pop[i] = 20; }
+  }
+  develop(w, 4000);
+
+  assert.ok(countLanes(w) > 0, 'no street was ever cut through the district');
+  let stranded = 0;
+  for (let i = 0; i < w.zone.length; i++) {
+    if (!w.zone[i] || w.road[i]) continue;
+    if (!hasFrontage(w, i)) stranded++;
+  }
+  assert.ok(stranded < 40, `${stranded} plots still have no street beside them`);
+});
+
+test('a lane is never cut through something the player placed', () => {
+  // A house is the developers\' to pull down. A power station is not.
+  const w = subdivision();
+  for (let i = 0; i < w.zone.length; i++) if (w.zone[i]) w.zone[i] = Z.NONE;
+  const placed = w.placeBuilding('coal', 10, 10);
+  assert.ok(placed, 'the test needs a building on the ground');
+  for (let y = 6; y < 30; y++) {
+    for (let x = 6; x < 30; x++) {
+      const i = w.idx(x, y);
+      if (w.build[i] === -1 && !w.road[i]) w.zone[i] = Z.R_LOW;
+    }
+  }
+  develop(w, 4000);
+  for (let dy = 0; dy < 3; dy++) {
+    for (let dx = 0; dx < 3; dx++) {
+      const i = w.idx(10 + dx, 10 + dy);
+      assert.equal(w.road[i], 0, `a lane was cut through the power station at ${10 + dx},${10 + dy}`);
+      assert.notEqual(w.build[i], -1, 'and the station should still be standing');
+    }
   }
 });
 
