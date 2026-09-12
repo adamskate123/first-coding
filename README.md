@@ -8,7 +8,7 @@ growth curve.
 
 Sandbox only. No campaigns, no scenarios, no win condition.
 
-Current version **0.13.0**, shown in the title bar. `VERSION` in
+Current version **0.14.0**, shown in the title bar. `VERSION` in
 `src/config.js` is the single source of truth — `package.json` carries the same
 number for tooling and a test asserts the two agree. Minor versions track
 feature releases; saves record the version that wrote them, though
@@ -57,7 +57,10 @@ unemployment, drawn from snapshots the city has been recording since 1900.
 When a new version has been deployed, a banner says so and offers a reload;
 taking it writes the city out first, so nothing laid since the last autosave is
 lost. Nothing reloads on its own — dropping a city mid-placement to pick up a
-cosmetic change would be worse than the staleness it fixes. **Budget** sets tax rates separately
+cosmetic change would be worse than the staleness it fixes. Once you *have*
+reloaded, the game says what you reloaded for: the release notes for everything
+since you were last here, once, and never to someone opening the game for the
+first time. Click the version number in the title bar to read them again. **Budget** sets tax rates separately
 for residential, commercial and industrial.
 
 ## Staying current, and working offline
@@ -363,6 +366,7 @@ src/
   tools.js          build tools and pointer handling
   save.js           serialisation
   update.js         noticing that a new version has been deployed
+  changelog.js      what changed, in the player's words
   sim/
     index.js        tick orchestration
     networks.js     road access and the power grid

@@ -177,6 +177,14 @@ export class UI {
     });
     document.getElementById('btn-budget').addEventListener('click', () => this.showBudget());
     document.getElementById('btn-graphs').addEventListener('click', () => this.showGraphs());
+
+    // No new chrome for this: the version is already on screen, and clicking
+    // the thing whose notes you want is where a player would look first.
+    const version = document.getElementById('version');
+    if (version) {
+      version.title = 'What changed in this version';
+      version.addEventListener('click', () => this.game.showReleaseNotes());
+    }
     document.getElementById('btn-save').addEventListener('click', () => this.game.save());
     document.getElementById('btn-load').addEventListener('click', () => {
       if (confirm('Discard changes since the last save and reload the stored city?')) this.game.load();
@@ -404,6 +412,36 @@ export class UI {
   }
 
   // -------------------------------------------------------------- modals --
+
+  /**
+   * What changed in the versions this player has not seen.
+   *
+   * Shown once after an update rather than every load, and never to someone
+   * opening the game for the first time -- a brand new player has nothing to
+   * compare it against, and a wall of notes about versions they never played
+   * is a poor welcome.
+   */
+  showChangelog(entries, { firstRun = false } = {}) {
+    if (!entries.length) {
+      if (!firstRun) this.toast('You are up to date.');
+      return false;
+    }
+
+    const one = entries.length === 1;
+    document.getElementById('modal-title').textContent = one
+      ? `What's new in ${entries[0].version}`
+      : `What's new since you were last here`;
+    document.getElementById('modal-body').innerHTML = entries.map((e) => `
+      <div class="release">
+        <div class="release-head">
+          <span class="k">${e.headline}</span>
+          <span class="v">${e.version}</span>
+        </div>
+        <ul>${e.changes.map((c) => `<li>${c}</li>`).join('')}</ul>
+      </div>`).join('');
+    document.getElementById('modal').classList.remove('hidden');
+    return true;
+  }
 
   /**
    * The city's own history, which it has been recording all along.
